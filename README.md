@@ -33,16 +33,9 @@ One day, LCONFIG will include automatic digital configuration and a layer for
 writing the some of the T7 modbus registers.  As things stand, you have to go
 grab the device connection handle and do that yourself.
 
-<<<<<<< HEAD
     int err, handle;
     handle = dconf[0].handle;
     err = LJM_eWriteName(handle, "RegisterName", ..value..);
-=======
-  int err, handle;
-  handle = dconf[0].handle;
-  err = LJM_eWriteName(handle, "RegisterName", ..value..);
->>>>>>> e8b43052956511746b855510501f47edae23b0dc
-
 
 ## Known Bugs
 As of Version 1.2, the analog output streaming only behaves properly when a 

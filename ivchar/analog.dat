@@ -1,0 +1,16 @@
+0.0
+80
+.288
+
+This file should contain three numbers separated by a newline.  There should be 
+no spaces and no other characters before the second number.  These indicate the 
+water flow rate in US gallons per hour, the air pressure in psig, and the 
+standoff in inches.
+
+4.0     <--- Water flow rate (GPH)
+80      <--- Air pressure (psig)
+.25     <--- Standoff (inches)
+
+Air flow rate is calculated from the pressure assuming the area of an orifice
+installed in the manifold where the two fluids are mixed.  The orifice is a 1/32
+drilled hole (.4948mm^2 area).  The flow is assumed to be choked (sonic).

@@ -21,6 +21,11 @@ their behavior and use.
 ***************
 ** Basic Use **
 ***************
+Just to get started, let's assume we've already written a configuration file 
+that lays out how to find our device and how measurements should be taken.  It's
+time to write an application that implements the measurement.  We'll learn how
+to write a configuration file in the next section.
+
 Be sure to start your code by including the header:
 """
 #include "lconfig.h"
@@ -46,20 +51,38 @@ on their own, but the application can check the returned integer for an error;
 int err;
 err = load_config(dconf, 8, "configuration_file_name");
 """
+^         ^         ^    ^          ^
+|         |         |    |          |                                        
+|         |         |    |          Name of the configuration file
+|         |         |    |
+|         |         |    Maximum # of devices allowed in dconf
+|         |         |
+|         |         The DEVCONF array to write
+|         |
+|         Functions defined by LCONFIG have detailed documentation above the
+|         function prototypes.  load_config does exactly what the name implies.
+|
+The integer returned by almost all LCONFIG functions indicates whether an error
+occurred.
 
 Running an experiment can be simple. This example loads a single device from a
 configuration file and writes 128 samples to a tab-delimited data file.
 """
-load_config(dconf,1,"myconfig.conf");
+load_config(dconf,1,"myconfig.conf");   // Open the config file and parse it
+open_config(dconf, 0);                  // Open a connection to device 0
+upload_config(dconf, 0);                // Write the configuration parameters
 start_file_stream(dconf, 0, 128, "output_file_name");
 read_file_stream(dconf, 0);
 stop_file_stream(dconf, 0);
+close_config(dconf, 0);
 """
 The data file will include a header that is also readable by load_config(). 
 Using an output file as a config file will cause LCONFIG to repeat the 
 experiment that lead to the data (to the extent that it controls the 
 experiment).
 
+For more information open lconfig.h and look at the comments above each function
+prototype.  Those represent the authoritative documentation for the file.
 
 **********************************
 ** Writing a Configuration File **
@@ -85,19 +108,25 @@ encounters a double-# ("##") at the beginning of a word, signaling the end of
 the configuration section.  This is useful because it allows load_config() to 
 parse configuration directives at the head of a data file.
 
+All of the configuration parameters are described authoritatively and in more 
+detail in the lconfig.h header itself.  This should get you started, but the
+best reference is the load_config() documentation above its prototype in the
+header.
+
 The device is identified either by its IP address or its serial number.  If the
 connection is over USB, the IP address is interpreted as a directive to be 
 written to the T7.  If the connection is over ethernet, then the IP address is
 the preferred way to identify the device.  A serial number can be used in either
 case, but it is extremely inefficient over ethernet.
 
-Version 1.1 of LCONF accepts the following parameters that configure the device:
+As of version 1.1 of LCONFIG accepts the following parameters that configure the
+device:
 conneciton  [eth|usb|any]   How to connect to the T7?
-serial      The device serial number
-IP          The device's IP address
-gateway     IP address of the subnet's gateway (only used in USB)
-subnet      The subnet mask of the subnet (only used in USB)
-samplehz    The stream sample rate in Hz
+serial      The device serial number (41...)
+IP          The device's IP address (192.168.0.10)
+gateway     IP address of the subnet's gateway (only used in USB) (192.168.0.1)
+subnet      The subnet mask of the subnet (only used in USB) (255.255.255.0)
+samplehz    The stream sample rate in Hz (100)
 
 Analog inputs are configured individually.  Each of the global parameters above 
 only appear once in a configuration file, but these can appear multiple times.
@@ -107,30 +136,33 @@ appears first.
 
 aichannel   [0-13]  Channel number of the analog measurement.
 airange     [0.01 | 0.1 | 1. | 10.]   Bipolar voltage input range.
-ainegative  [aichannel+1 | 199 | ground]  Negative voltage source (199=GND)
+ainegative  [aichannel+1 | 199 | differential | ground] Negative voltage source 
+                    (199<=>ground, aichannel+1<=>differential)
 airesolution    The resolution index used by the T7
 
 The output stream works in the same way as the input streams.  The AOCHANNEL 
 parameter indicates the creation of a new stream, and all output parameters
 after apply to that stream.  Outputs mimic a function generator; repeating in a
-loop.  Therefore, the output parameters are quite different.
+loop.  The output parameters serve to configure the cyclical function.
 
 aochannel   [0 | 1] Channel number of the analog output
 aosignal    [constant | sine | square | triangle | noise]
-aofrequency     The signal repetition frequency in Hz
+aofrequency     The signal repetition frequency in Hz  (50)
 aoamplitude     The signal amplitude (1/2 pk-pk)
 aooffset        The signal offset
-aoduty          Duty cycle for square and triangle
+aoduty          Duty cycle for square and triangle (0<= duty <=1)
 
-The last class of parameters recognized by version 1.1 is meta.  Meta parameters
-are not inherently recognized by LCONF, but might be used by the host 
+The last class of parameters recognized by version 1.1 is "meta."  Meta 
+parameters are not inherently recognized by LCONFIG, but might be used by the host 
 application.  As a result, the configuration file needs to specify what kind of
 data the parameter uses.
 
-int:param
-flt:param
-str:param
+int:param   5       creates an integer named "param" and stores 5 in it
+flt:param   5.1     creates a double named "param" and stores 5.1 in it
+str:param   five    creates a string named "param" and stores "five" in it
 
+To learn how to interact with meta parameters, see the get_meta_XXX() and 
+put_meta_XXX() functions in lconfig.h.
 
 **************************
 ** High Speed Streaming **
@@ -205,3 +237,27 @@ DEVCONF dconf[?];
   |--+ double* buffer;              // A buffer for reading in data
   l--+ unsigned int samples_per_read;  // The size of the buffer
 
+
+***************
+** Debugging **
+***************
+If you want to verify that your parameters are being written properly, you can 
+always connect to the device using LabJack's Kipling software and look at the 
+registers.
+
+LCONFIG includes two other options for you; download_config() and show_config().
+The most basic is download_config().  This operation populates a configuration
+struct to reflect the current status of the T7 as if it had been loaded from a 
+file.
+"""
+int err;
+DEVCONF test;
+err = download_config(dconf, 0, &test);
+"""
+The behavior isn't quite ideal, because some parameters cannot be detected from
+the device (like what analog signal is in the buffer, or the number of samples
+per read in AI streaming).
+
+If you are using a Linux console, then there is show_config().  This operation
+calls download_config and does a line-by-line comparison encoded by color to
+indicate agreement or disagreement.

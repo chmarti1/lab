@@ -11,9 +11,9 @@
 .   Tested on the Linux kernal 3.19.0
 .   Linux Mint 17.3 Rosa
 .   LJ Exoderiver v2.5.3
-.   LJM Library 1.0900
+.   LJM Library 1.13
 .   T7 Firmware 1.0188
-.   LibUSB 1.0.9
+.   LibUSB 2:0.1.12
 .
 */
 
@@ -71,6 +71,11 @@ SETTLEUS exposes the settling time to the user.  Before, a value of 0us was used
 to prompt the T7 to choose for us.  Now, 1us is used by default, so the LJ will
 still choose for us unless we specify a value greater than 5us.
 Corrected a bug in get_met_flt() that tried to treat the value as an integer.
+
+**1.3
+11/22/16
+Corrected a bug that prevented multiple analog output streams from working 
+correctly.
 */
 
 #define TWOPI 6.283185307179586
@@ -98,6 +103,8 @@ Corrected a bug in get_met_flt() that tried to treat the value as an integer.
 #define write_aostr(param,child) if(dconf[devnum].aoch[aonum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].aoch[aonum].child);}
 #define write_aoint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].aoch[aonum].child);
 #define write_aoflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].aoch[aonum].child);
+// macro for testing strings
+#define streq(a,b) strncmp(a,b,LCONF_MAX_STR)==0
 
 #define LCONF_COLOR_RED "\x1b[31m"
 #define LCONF_COLOR_GREEN "\x1b[32m"
@@ -158,6 +165,7 @@ typedef struct aoconf {
     double          duty;         // Duty cycle for a square wave or triangle wave
                                   // duty=1 results in all-high square and an all-rising triangle (sawtooth)
 } AOCONF;
+
 
 // The METACONF is a struct for user-defined flexible parameters.
 // These are not used to configure the DAQ, but simply data of record
@@ -748,8 +756,10 @@ int load_config(DEVCONF* dconf, const unsigned int devmax, const char* filename)
         }
 
         // Case out the parameters
-        // The "conneciton" parameter defines a new connection to be configured
-        if(strncmp(param,"connection",LCONF_MAX_STR)==0){
+        //
+        // The CONNECTION parameter
+        //
+        if(streq(param,"connection")){
             // increment the device index
             devnum++;
             if(devnum>=devmax){
@@ -769,46 +779,55 @@ int load_config(DEVCONF* dconf, const unsigned int devmax, const char* filename)
                 fprintf(stderr,"%s\n","Expected \"usb\", \"eth\", or \"any\".");
                 goto lconf_loadfail;
             }
-
-        // Deal with the case that the first parameter isn't a "connection" parameter
+        //
+        // What if CONNECTION isn't first?
+        //
         }else if(devnum<0){
             fprintf(stderr,"LOAD: The first configuration parameter must be \"connection\".\n\
 Found \"%s\"\n", param);
             return LCONF_ERROR;
-
+        //
         // The IP parameter
-        }else if(strncmp(param,"ip",LCONF_MAX_STR)==0){
+        //
+        }else if(streq(param,"ip")){
             strncpy(dconf[devnum].ip,value,LCONF_MAX_STR);
-
-        // The gateway parameter
-        }else if(strncmp(param,"gateway",LCONF_MAX_STR)==0){
+        //
+        // The GATEWAY parameter
+        //
+        }else if(streq(param,"gateway")){
             strncpy(dconf[devnum].gateway,value,LCONF_MAX_STR);
-
-        // The subnet parameter
-        }else if(strncmp(param,"subnet",LCONF_MAX_STR)==0){
+        //
+        // The SUBNET parameter
+        //
+        }else if(streq(param,"subnet")){
             strncpy(dconf[devnum].subnet,value,LCONF_MAX_STR);
-
+        //
         // The SERIAL parameter
-        }else if(strncmp(param,"serial",LCONF_MAX_STR)==0){
+        //
+        }else if(streq(param,"serial")){
             strncpy(dconf[devnum].serial,value,LCONF_MAX_STR);
-
+        //
         // The SAMPLEHZ parameter
-        }else if(strncmp(param,"samplehz",LCONF_MAX_STR)==0){
+        //
+        }else if(streq(param,"samplehz")){
             if(sscanf(value,"%f",&ftemp)!=1){
                 fprintf(stderr,"LOAD: Illegal SAMPLEHZ value \"%s\". Expected float.\n",value);
                 goto lconf_loadfail;
             }
             dconf[devnum].samplehz = ftemp;
-        
+        //
         // The SETTLEUS parameter
-        }else if(strncmp(param,"settleus",LCONF_MAX_STR)==0){
+        //
+        }else if(streq(param,"settleus")){
             if(sscanf(value,"%f",&ftemp)!=1){
                 fprintf(stderr,"LOAD: Illegal SETTLEUS value \"%s\". Expected float.\n",value);
                 goto lconf_loadfail;
             }
             dconf[devnum].settleus = ftemp;
+        //
         // The NSAMPLE parameter
-        }else if(strncmp(param,"nsample",LCONF_MAX_STR)==0){
+        //
+        }else if(streq(param,"nsample")){
             if(sscanf(value,"%d",&itemp)!=1){
                 fprintf(stderr,"LOAD: Illegal NSAMPLE value \"%s\".  Expected integer.\n",value);
                 goto lconf_loadfail;
@@ -816,8 +835,10 @@ Found \"%s\"\n", param);
                 fprintf(stderr,"LOAD: **WARNING** NSAMPLE value was less than or equal to zero.\n"
                        "      Fix this before initiating a stream!\n");
             dconf[devnum].nsample = itemp;
-        // The AIchannel parameter
-        }else if(strncmp(param,"aichannel",LCONF_MAX_STR)==0){
+        //
+        // The AICHANNEL parameter
+        //
+        }else if(streq(param,"aichannel")){
             ainum = dconf[devnum].naich;
             // Check for an array overrun
             if(ainum>=LCONF_MAX_NAICH){
@@ -840,9 +861,10 @@ Found \"%s\"\n", param);
             dconf[devnum].aich[ainum].range = LCONF_DEF_AI_RANGE;
             dconf[devnum].aich[ainum].resolution = LCONF_DEF_AI_RES;
             dconf[devnum].aich[ainum].nchannel = LCONF_DEF_AI_NCH;
-
-        // The AIrange parameter
-        }else if(strncmp(param,"airange",LCONF_MAX_STR)==0){
+        //
+        // The AIRANGE parameter
+        //
+        }else if(streq(param,"airange")){
             ainum = dconf[devnum].naich-1;
             // Test that there is a configured channel already
             if(ainum<0){
@@ -854,9 +876,10 @@ Found \"%s\"\n", param);
                 goto lconf_loadfail;
             }
             dconf[devnum].aich[ainum].range = ftemp;
-
-        // The AInegative parameter
-        }else if(strncmp(param,"ainegative",LCONF_MAX_STR)==0){
+        //
+        // The AINEGATIVE parameter
+        //
+        }else if(streq(param,"ainegative")){
             ainum = dconf[devnum].naich-1;
             // Test that there is a configured channel already
             if(ainum<0){
@@ -889,9 +912,10 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
             dconf[devnum].aich[ainum].nchannel = itemp;
-
-        // The AIresolution parameter
-        }else if(strncmp(param,"airesolution",LCONF_MAX_STR)==0){
+        //
+        // The AIRESOLUTION parameter
+        //
+        }else if(streq(param,"airesolution")){
             ainum = dconf[devnum].naich-1;
             if(ainum<0){
                 fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
@@ -906,9 +930,10 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
             dconf[devnum].aich[ainum].resolution = itemp;
-
-        // The AOchannel parameter
-        }else if(strncmp(param,"aochannel",LCONF_MAX_STR)==0){
+        //
+        // The AOCHANNEL parameter
+        //
+        }else if(streq(param,"aochannel")){
             aonum = dconf[devnum].naoch;
             // Check for an array overrun
             if(aonum>=LCONF_MAX_NAOCH){
@@ -932,9 +957,10 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
             dconf[devnum].aoch[aonum].amplitude = LCONF_DEF_AO_AMP;
             dconf[devnum].aoch[aonum].offset = LCONF_DEF_AO_OFF;
             dconf[devnum].aoch[aonum].duty = LCONF_DEF_AO_DUTY;
-
-        // The AOsignal parameter
-        }else if(strncmp(param,"aosignal",LCONF_MAX_STR)==0){
+        //
+        // The AOSIGNAL parameter
+        //
+        }else if(streq(param,"aosignal")){
             aonum = dconf[devnum].naoch-1;
             if(aonum<0){
                 fprintf(stderr,"LOAD: Cannot set analog output parameters before the first AOchannel parameter.\n");
@@ -950,9 +976,10 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 fprintf(stderr,"LOAD: Illegal AOsignal type: %s\n",value);
                 goto lconf_loadfail;
             }
-
-        // AOfrequency
-        }else if(strncmp(param,"aofrequency",LCONF_MAX_STR)==0){
+        //
+        // AOFREQUENCY
+        //
+        }else if(streq(param,"aofrequency")){
             aonum = dconf[devnum].naoch-1;
             if(aonum<0){
                 fprintf(stderr,"LOAD: Cannot set analog output parameters before the first AOchannel parameter.\n");
@@ -966,9 +993,10 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
             dconf[devnum].aoch[aonum].frequency = ftemp;
-
-        // AOamplitude
-        }else if(strncmp(param,"aoamplitude",LCONF_MAX_STR)==0){
+        //
+        // AOAMPLITUDE
+        //
+        }else if(streq(param,"aoamplitude")){
             aonum = dconf[devnum].naoch-1;
             if(aonum<0){
                 fprintf(stderr,"LOAD: Cannot set analog output parameters before the first AOchannel parameter.\n");
@@ -979,9 +1007,10 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
             dconf[devnum].aoch[aonum].amplitude = ftemp;
-
-        // AOoffset
-        }else if(strncmp(param,"aooffset",LCONF_MAX_STR)==0){
+        //
+        // AOOFFSET
+        //
+        }else if(streq(param,"aooffset")){
             aonum = dconf[devnum].naoch-1;
             if(aonum<0){
                 fprintf(stderr,"LOAD: Cannot set analog output parameters before the first AOchannel parameter.\n");
@@ -995,9 +1024,10 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
             dconf[devnum].aoch[aonum].offset = ftemp;
-
-        // AOduty parameter
-        }else if(strncmp(param,"aoduty",LCONF_MAX_STR)==0){
+        //
+        // AODUTY parameter
+        //
+        }else if(streq(param,"aoduty")){
             aonum = dconf[devnum].naoch-1;
             if(aonum<0){
                 fprintf(stderr,"LOAD: Cannot set analog output parameters before the first AOchannel parameter.\n");
@@ -1038,8 +1068,8 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
     return LCONF_NOERR;
 
     lconf_loadfail:
-    fprintf(stderr,"LCONFIG: Error while parsing device %d and AI channel %d\n\
-in file \"%s\"",devnum,ainum,filename);
+    fprintf(stderr,"LCONFIG: Error while parsing device %d in file \"%s\"",\
+                    devnum,filename);
     fclose(ff);
     return LCONF_ERROR;
 }
@@ -1840,7 +1870,7 @@ int start_data_stream(DEVCONF* dconf, const unsigned int devnum, int samples_per
     for(aonum=0;aonum<dconf[devnum].naoch;aonum++){
         stlist[index] = reg_temp;
         // increment the index and the register
-        reg_temp += 2;
+        reg_temp += 1;
         index+=1;
     }
     // Write the settling time

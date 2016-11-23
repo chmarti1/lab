@@ -40,7 +40,7 @@ $chmod a+x your_exec.bin
 #include <LabJackM.h>   // duh
 
 
-#define LCONF_VERSION 1.1   // Track modifications in the header
+#define LCONF_VERSION 1.3   // Track modifications in the header
 /*
 These change logs follow the convention below:
 **LCONF_VERSION

@@ -4,7 +4,7 @@
 import os, sys
 import numpy as np
 
-__version__ = '1.1.0'
+__version__ = '2.0.1'
 
 #define LCONF_MAX_STR 32
 #define LCONF_MAX_READ "%32s"
@@ -379,7 +379,9 @@ simply reverse the values so that the larger is listed first.
         self.data = []
         self.afun = afun
         self._record = {}
-        
+    
+    def __iter__(self):
+        return self.data.__iter__()
         
     def __len__(self):
         return len(self.data)

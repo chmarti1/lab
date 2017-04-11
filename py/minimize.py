@@ -13,48 +13,8 @@ import sys
 
 golden = (3. - np.sqrt(5.))/2.
 
-class wfunNd:
-    """Wrapper function evaluating a function of the form
-    y = f(x0 + s*dx)
-where x and dx are N-dimensional vectors, and s and y are scalars.
-For example:
-    f = lambda(x):np.linalg.norm(x)
-    wf = wfunNd(f)
 
-wf(s) will return the value of f() along a line in x-space that goes 
-through the point, x0 in a direction dx.  wf will have members
-    x0 - the point through which the line passes
-    dx - the direction of the line
-    invert - a True/False flag.  When True, wf() returns -fun()
-    fun - the function being evaluated
-
-    f = lambda(x):np.linalg.norm(x)
-    wf = wfunNd(f)
-    wf.x0 = np.array((2,2))
-    wf.dx = np.array((1,-.5))
-    wf.invert = False
-    wf(0.5)
-returns 3.0516389039334255, equivalent to f((2.5, 1.75))
-    wf(1.0)
-returns 3.3541019662496847, equivalent to f((3., 1.5))
-"""
-    def __init__(self, fun):
-        self.fun = fun
-        self.invert = False
-        self.x0 = None
-        self.dx = None
-        
-    def __call__(self,s,*varg,**kwarg):
-        x = self.x0 + s*self.dx
-        if self.invert:
-            return -self.fun(x,*varg,**kwarg)
-        else:
-            return self.fun(x,*varg,**kwarg)
-
-
-
-
-def bracket1d(fun, x0, small=1e-10, epsilon=1e-5, dx=None, varg=(), kwarg={}, 
+def bracket1d(fun, x0, small=1e-8, epsilon=1e-5, dx=None, varg=(), kwarg={}, 
               Nmax=50, verbose=False):
     """BRACKET1D
     Given a one-dimensional function and an initial guess for a minimum,
@@ -132,13 +92,10 @@ verbose
             sys.stdout.write(' +-- df/dx   = %.5e\n +-- d2f/dx2 = %.5e\n'%(df,ddf))
 
         # Do a sanity check on the derivatives
-        if df == 0.:
+        if y0<y1 and y0<y2:
             if verbose:
-                sys.stdout.write(' +-- The derivative is zero.  This is an extremum!\n')
-            if ddf<0:
-                return x1,x0,x2,y1,y0,y2
-            else:
-                raise Exception('BRACKET1D: The initial guess seems to be at a maximum.')
+                sys.stdout.write(' +-- The initial guess is a minimum!\n')
+            return x1,x0,x2,y1,y0,y2
         # If the local curvature is very small, use the first derivative
         elif abs(ddf) < max(small, epsilon*abs(df)):
             # Go downhill, but with a length scale determined by the size of
@@ -200,8 +157,10 @@ verbose
     raise Exception('BRACKET1D: Failed to bracket an interval with a minimum.')
     
 
+
+
 def min1d(fun, x0, x1=None, xy=False, Nmax=200, 
-          small=1e-10, epsilon=1e-5, varg=(), kwarg={}, verbose=False):
+          small=1e-8, epsilon=1e-5, varg=(), kwarg={}, verbose=False):
     """MIN1D  Minimize a 1-D function
     x = min1d(f, x0)
         OR
@@ -294,3 +253,115 @@ verbose
                 
     raise Exception('Failed to converge to a minimum!')
     
+    
+    
+    
+
+class wfNd:
+    """Wrapper function evaluating a function of the form
+    y = f(x0 + s*dx)
+where x and dx are N-dimensional vectors, and s and y are scalars.
+For example:
+    f = lambda(x):np.linalg.norm(x)
+    wf = wfNd(f)
+
+wf(s) will return the value of f() along a line in x-space that goes 
+through the point, x0 in a direction dx.  wf will have members
+    x0 - the point through which the line passes
+    dx - the direction of the line
+    invert - a True/False flag.  When True, wf() returns -fun()
+    fun - the function being evaluated
+
+    f = lambda(x):np.linalg.norm(x)
+    wf = wfunNd(f)
+    wf.x0 = np.array((2,2))
+    wf.dx = np.array((1,-.5))
+    wf.invert = False
+    wf(0.5)
+returns 3.0516389039334255, equivalent to f((2.5, 1.75))
+    wf(1.0)
+returns 3.3541019662496847, equivalent to f((3., 1.5))
+
+The optional Nmax parameter configures 
+"""
+    def __init__(self, fun, Nmax=None):
+        self.fun = fun
+        self.invert = False
+        self.x0 = None
+        self.dx = None
+        self.count = 0
+        self.Nmax = Nmax
+        
+    def __call__(self,s,*varg,**kwarg):
+        if self.count == self.Nmax:
+            raise Exception('WFND wrapper function exceeded its maximum call count.')
+        self.count += 1
+        if self.invert:
+            return -self.fun(self.x(s),*varg,**kwarg)
+        else:
+            return self.fun(self.x(s),*varg,**kwarg)
+            
+    def x(self,s):
+        """Reconstruct the x vector from s"""
+        return self.x0 + self.dx*s
+    
+
+
+
+
+def minNd(fun, x0, xy=False, Nmax=1000, 
+          small=1e-10, epsilon=1e-5, varg=(), kwarg={}, verbose=False):
+    """MINND  Minimize a function of N dimensions
+
+x = minNd(f, x0)
+    or
+x,y = minNd(f, x0)
+
+Mandatory arguments:
+f   is the scalar function to be minimized.  It must answer to the call
+    signature y = f(x), where y is a scalar float equivalent, and x is
+    a 1D numpy array of length N.
+    
+x0  is the initial x-value to use while searching for the minimum.  It 
+    It should be an iterable of length N.  It will be converted into a 
+    numpy array at the beginning of the algorithm.
+
+Optional arguments:
+xy  Normally, min1d only returns the converged value for x.  If xy is
+    set to True, then min1d also returns the function's value, y in a
+    tuple with x;
+        x,y = min1d(f,x0,xy=True)
+
+Nmax
+    The maximum number of function calls permitted.  This parameter is
+    used in the wfNd wrapper class to trigger an exception if it is 
+    exceeded.
+
+verbose
+    A boolean flag indicating whether to print iteration progress to 
+    stdout
+"""
+    # Convert the initial x into a numpy array
+    x0 = np.array(x0)
+    # Configure the wrapper function
+    wf = wfNd(fun, Nmax)
+    
+    # Detect the space dimension
+    N = x0.size
+    # Construct the initial set of basis vectors
+    U = np.eye(N)
+    # and a point record
+    x = [None]*N
+    x[-1] = x0
+    # Begin the iteration
+    while True:
+        # Initialize the line position
+        wf.x0 = x[-1]
+        # Loop through each of the dimensions
+        for index in range(N):
+            wf.dx = U[:,index]
+            s = min1d(wf, 0., Nmax = Nmax, verbose=verbose, 
+                      epsilon=epsilon, small=small, varg=varg, kwarg=kwarg)
+            x[index] = wf.x(s)
+            wf.x0 = x[index]
+        # Construct a new set of orthogonal vectors

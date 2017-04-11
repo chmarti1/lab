@@ -9,6 +9,12 @@
 
 #include "lconfig.h"
 
+
+/*....................
+.   Globals
+....................*/
+char err_str[LJM_MAX_NAME_SIZE];
+
 /*.............................
 .
 .   Algorithm definition
@@ -173,6 +179,10 @@ int load_config(DEVCONF* dconf, const unsigned int devmax, const char* filename)
 
     // open the file
     ff = fopen(filename, "r");
+    if(ff==NULL){
+        fprintf(stderr,"LOAD: Failed to open the configuration file \"%s\".\n",filename);
+        return LCONF_ERROR;
+    }
     // Read the entire file
     while(!feof(ff)){
         // Read in the parameter name
@@ -538,6 +548,17 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                     devnum,filename);
     fclose(ff);
     return LCONF_ERROR;
+}
+
+
+
+
+int ndev_config(DEVCONF* dconf, const unsigned int devmax){
+    int ii;
+    for(ii=0; ii<devmax; ii++)
+        if(dconf[ii].connection<0)
+            return ii;
+    return devmax;
 }
 
 

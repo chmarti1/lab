@@ -258,6 +258,15 @@ configured in the file.
     return done
 
 
+def default_afun(fileobj):
+    """Default analysis function for dfile objects
+    Copies all meta data verbatim into the analysis dictionary
+"""
+    out = {}
+    for cfg in fileobj.config:
+        out.update(cfg.meta)
+    return out
+
 
 class dfile:
     """LCONFIG data file object
@@ -408,15 +417,19 @@ lists and dictionaries will be.
 """
         newbie = collection()
         newbie.data = list(self.data)
-        newbie._record = dict(self._record)
+        newbie._record = {}
         newbie.afun = self.afun
         return newbie
 
     def __delitem__(self, item):
         if isinstance(item, int):
             del self.data[item]
-            for this in self._record:
-                del self._record[this][item]
+            try:
+                for this in self._record:
+                    del self._record[this][item]
+            except:
+                sys.stderr.write("Warning: The _record entry seems to be corrupt - clearing.\n")
+                self._record = {}
         elif item in self._record:
             del self._record[item]
         else:
@@ -455,19 +468,154 @@ lists and dictionaries will be.
         return newbie
 
 
-    def add_dir(self, directory = '.'):
+    def merge(self, C):
+        """Merge another collection into the current one
+    C1.merge(C2)
+    
+Modifies C1 to also include all of the entries in C2.
+"""
+        if self.afun is None:
+            self.afun = C.afun
+        elif C.afun is not self.afun:
+            raise Exception('The target collection does not have a compatible analysis funciton.')
+        self._record = {}
+        self.data+=C.data
+        
+
+
+    def add_dir(self, directory = '.', pause=False, verbose=False):
         """add_dir(directory = '.')
     read in all data files in the directory to the collection
 When called without an argument, it reads in the current directory.  Files with
 a .dat extension will be read in.
 """
+        if pause:
+            verbose = True
         contents = os.listdir(directory)
         for this in contents:
             # If this is a data file
             if this.endswith('.dat'):
                 fullpath = os.path.join(directory,this)
+                if verbose:
+                    sys.stdout.write(fullpath + '\n')
                 self.data.append(dfile(fullpath, afun=self.afun))
+                if pause:
+                    uio = raw_input('Press enter to continue\nEnter "H" to halt:')
+                    if uio == 'H':
+                        raise Exception('User Halt')
+                    
         # Erase the prior assembled analysis items
         self._record = {}
             
     
+    def getfiles(self):
+        """Construct a list of file names contained in the collection
+"""
+        return [this.filename for this in self.data]
+        
+    
+    def table(self, entries, sort=None, header=-1,
+              fileout=sys.stdout, filename=True):
+        """Print a whitespace separated table
+    C.table(('analysis_var1', 'analysis_var2'))
+    
+Accepts an iterable containing string parameter names to find in the data
+file anlaysis results.  If entires is a dictionary, then its keywords are
+treated as analysis string parameters, and the values are interpreted as
+C-style format strings.  For example,
+
+    C.table({'var1':'%.4e', 'var2':'%4d'})
+
+If no format specifier is given, then table will simply use the repr()
+function to form an entry.
+
+sort = None
+    Accepts a string to indicate an entry by which to sort the table
+    For example,
+        C.table(('var1','var2'), sort='var2')
+        
+header = -1
+    Indicates how often to print a header.  If header is a negative 
+    number, it will be printed once at the top of the table.  If header
+    is zero, no header will be printed.  If the header is a positive
+    number, it indicates the number of lines of data to print before
+    
+    
+filename = True
+    Boolean flag indicating whether to include the source file name as 
+    the first column.
+    
+fileout = stdout
+    Accepts an open file specifier or a string path to a file to 
+    overwrite.  To perform a different operation (like appending), open
+    the file outside of the table function and pass the file object to
+    the fileout keyword.
+"""
+        if isinstance(fileout,str):
+            ff = open(fileout,'w+')
+        elif isinstance(fileout, file):
+            ff = fileout
+        else:
+            raise Exception('Illegal value for "fileout" keyword.')
+        # First, construct a table of the string entries
+        table = []
+        # Add the filename 
+        if filename:
+            table.append([
+                os.path.split(this.filename)[1]
+                for this in self.data])
+        
+        for entry in entries:
+            # Select a function for building the string entry
+            if isinstance(entries,dict):
+                if entries[entry] is None:
+                    mkstr = repr
+                # Use a C-style format
+                mkstr = lambda(t): entries[entry]%t
+            else:
+                mkstr = repr
+            try:
+                table.append([ mkstr(value) for value in self[entry] ])
+            except:
+                print sys.exc_info()
+                raise Exception('TABLE: Failed while building the column for "%s"'%entry)
+
+        if header<0:
+            rown = 0
+            coln = 0
+            if filename:
+                table[coln].insert(rown,'file_name')
+                coln = 1
+            for entry in entries:
+                table[coln].insert(rown,entry)
+                coln+=1
+
+        elif header>0:
+            inserts = int(len(table[0])/header)
+            for insn in range(inserts,-1,-1):
+                rown = insn * header
+                coln = 0
+                if filename:
+                    table[coln].insert(rown,'file_name')
+                    coln = 1
+                for entry in entries:
+                    table[coln].insert(rown,entry)
+                    coln+=1
+        
+        rowfmt=''
+        # Detect the column widths and build the row format
+        for col in table:
+            mwidth = 0
+            for item in col:
+                mwidth = max(mwidth, len(item))
+            rowfmt += '%' + '%d'%(mwidth + 1) + 's'
+        rowfmt += '\n'
+        
+        # Loop through the rows
+        for rindex in range(len(table[0])):
+            ff.write( rowfmt%tuple([this[rindex] for this in table]) )
+        
+        # If TABLE opened the file
+        if not isinstance(fileout,file):
+            ff.close()
+            

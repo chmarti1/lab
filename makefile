@@ -14,3 +14,6 @@ ivchar.bin: lconfig.o ivchar.c
 	gcc lconfig.o ivchar.c $(LINK) -o ivchar.bin
 	chmod +x ivchar.bin
 
+drun.bin: lconfig.o drun.c
+	gcc lconfig.o drun.c $(LINK) -o drun.bin
+

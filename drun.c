@@ -1,17 +1,88 @@
 #include "ldisplay.h"
 #include "lconfig.h"
+#include <string.h>
 #include <unistd.h>
 #include <stdio.h>
 
 #define CONFIG_FILE "drun.conf"
-#define PRE_FILE   "drun_pre.dat"
+#define PRE_FILE    "drun_pre.dat"
 #define POST_FILE   "drun_post.dat"
 #define DATA_FILE   "drun.dat"
 #define NBUFFER     65535
 #define NDEV        3
 #define MAXLOOP     2000
+#define MAXSTR      128
 
-int main(){
+/*...................
+.   Global Options
+...................*/
+char    pre_file[MAXSTR] = PRE_FILE,   // The pre-stream data file name
+        post_file[MAXSTR] = POST_FILE,  // The post-stream data file
+        data_file[MAXSTR] = DATA_FILE,  // The data file
+        config_file[MAXSTR] = CONFIG_FILE;  //  The configuration file
+
+/*....................
+. Prototypes
+.....................*/
+// Parse the command-line options strings
+// Modifies the globals appropriately
+int parse_options(int argc, char*argv[]);
+
+/*....................
+. Help text
+.....................*/
+const char help_text[] = \
+"drun [-h] [-r PREFILE] [-p POSTFILE] [-d DATAFILE] [-c CONFIGFILE]\n"\
+"  Runs a data acquisition job until the user exists with a keystroke.\n"\
+"\n"\
+"PRE and POST data collection\n"\
+"  When DRUN first starts, it loads the selected configuration file\n"\
+"  (see -c option).  If only one device is found, it will be used for\n"\
+"  the continuous DAQ job.  However, if multiple device configurations\n"\
+"  are found, they will be used to take bursts of data before (pre-)\n"\
+"  after (post-) the continuous DAQ job.\n"\
+"\n"\
+"  If two devices are found, the first device will be used for a single\n"\
+"  burst of data acquisition prior to starting the continuous data \n"\
+"  collection with the second device.  The NSAMPLE parameter is useful\n"\
+"  for setting the size of these bursts.\n"\
+"\n"\
+"  If three devices are found, the first and second devices will still\n"\
+"  be used for the pre-continous and continuous data sets, and the third\n"\
+"  will be used for a post-continuous data set.\n"\
+"\n"\
+"  In all cases, each data set will be written to its own file so that\n"\
+"  DRUN creates one to three files each time it is run.\n"\
+"\n"\
+"-c CONFIGFILE\n"\
+"  By default, DRUN will look for \"drun.conf\" in the working\n"\
+"  directory.  This should be an LCONFIG configuration file for the\n"\
+"  LabJackT7 containing no more than three device configurations.\n"\
+"  The -c option overrides that default.\n"\
+"     $ drun -c myconfig.conf\n"\
+"\n"\
+"-d DATAFILE\n"\
+"  This option overrides the default continuous data file name\n"\
+"  \"drun.dat\"\n"\
+"     $ drun -d mydatafile.dat\n"\
+"\n"\
+"-r PREFILE\n"\
+"  This option overrides the default pre-continuous data file name\n"\
+"  \"drun_pre.dat\"\n"\
+"     $ drun -r myprefile.dat\n"\
+"\n"\
+"-p POSTFILE\n"\
+"  This option overrides the default post-continuous data file name\n"\
+"  \"drun_post.dat\"\n"\
+"     $ drun -p myprefile.dat\n"\
+"\n"\
+"(c)2017 C.Martin\n";
+
+
+/*....................
+. Main
+.....................*/
+int main(int argc, char *argv[]){
     int ndev;   // actual number of devices
                 // NDEV is the maximum 
     int stream_dev = 0; // which device will be used for streaming?
@@ -19,11 +90,15 @@ int main(){
     unsigned int count; // count the number of loops for safe exit
     DEVCONF dconf[NDEV];
 
+    // Parse the command-line options
+    if(parse_options(argc, argv))
+        return -1;
+
     // Load the configuration
     printf("Loading configuration file...");
-    if(load_config(dconf, NDEV, CONFIG_FILE)){
+    if(load_config(dconf, NDEV, config_file)){
         printf("FAILED\n");
-        fprintf(stderr, "DRUN failed while loading the configuration file \"" CONFIG_FILE "\"\n");
+        fprintf(stderr, "DRUN failed while loading the configuration file \"%s\"\n", config_file);
         return -1;
     }else
         printf("DONE\n");
@@ -56,7 +131,7 @@ int main(){
             close_config(dconf,0);
             return -1;
         }
-        if(start_file_stream(dconf, 0, -1, PRE_FILE)){
+        if(start_file_stream(dconf, 0, -1, pre_file)){
             printf("FAILED\n");
             fprintf(stderr, "DRUN failed to start preliminary data collection.\n");
             close_config(dconf,0);
@@ -81,7 +156,6 @@ int main(){
 
 
     // Perform the streaming data collection process
-    printf("Press \"Q\" to quit the process\nStreaming measurements...");
     if(open_config(dconf, stream_dev)){
         printf("FAILED\n");
         fprintf(stderr, "DRUN failed to open the device for streaming.\n");
@@ -93,14 +167,16 @@ int main(){
         close_config(dconf,stream_dev);
         return -1;
     }
-    if(start_file_stream(dconf, stream_dev, -1, DATA_FILE)){
+    if(start_file_stream(dconf, stream_dev, -1, data_file)){
         printf("FAILED\n");
         fprintf(stderr, "DRUN failed to start the data stream.\n");
         close_config(dconf,stream_dev);
         return -1;
     }
+    show_config(dconf, stream_dev);
 
     // Setup the keypress for exit conditions
+    printf("Press \"Q\" to quit the process\nStreaming measurements...");
     setup_keypress();
     go = 1;
     for(count=0; go && count<MAXLOOP; count++){
@@ -142,7 +218,7 @@ int main(){
             close_config(dconf,2);
             return -1;
         }
-        if(start_file_stream(dconf, 2, -1, POST_FILE)){
+        if(start_file_stream(dconf, 2, -1, post_file)){
             printf("FAILED\n");
             fprintf(stderr, "DRUN failed to start post data collection.\n");
             close_config(dconf,2);
@@ -166,5 +242,38 @@ int main(){
     }
 
     printf("Exited successfully.\n");
+    return 0;
+}
+
+
+
+int parse_options(int argc, char* argv[]){
+    int index;
+    char* target=NULL;
+
+    // The target pointer indicates to what global parameter string values
+    // will be written.  Option flags refocus the pointer and writing a value
+    // will swing the pointer back to NULL.
+    for(index=1; index<argc; index++){
+        // Help text
+        if(strncmp(argv[index],"-h",MAXSTR)==0){
+            printf(help_text);
+            return -1;
+        }else if(strncmp(argv[index],"-r",MAXSTR)==0)
+            target = pre_file;
+        else if(strncmp(argv[index],"-d",MAXSTR)==0)
+            target = data_file;
+        else if(strncmp(argv[index],"-c",MAXSTR)==0)
+            target = config_file;
+        else if(strncmp(argv[index],"-p",MAXSTR)==0)
+            target = post_file;
+        else if(target){
+            strncpy(target,argv[index],MAXSTR);
+        }else{
+            target = NULL;
+            fprintf(stderr,"Unexpected parameter \"%s\"\n", argv[index]);
+            return -1;
+        }
+    }
     return 0;
 }

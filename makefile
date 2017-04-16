@@ -3,7 +3,7 @@ LINK=-lLabJackM -lm
 
 # The LCONFIG object file
 lconfig.o: lconfig.c lconfig.h
-	gcc -c lconfig.c
+	gcc -c lconfig.c -o lconfig.o
 
 # The Binaries...
 #
@@ -14,6 +14,6 @@ ivchar.bin: lconfig.o ivchar.c
 	gcc lconfig.o ivchar.c $(LINK) -o ivchar.bin
 	chmod +x ivchar.bin
 
-drun.bin: lconfig.o drun.c
-	gcc lconfig.o drun.c $(LINK) -o drun.bin
-
+drun: lconfig.o drun.c
+	gcc lconfig.o drun.c $(LINK) -o drun
+	chmod +x drun

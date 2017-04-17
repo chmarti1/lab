@@ -269,6 +269,7 @@ int parse_options(int argc, char* argv[]){
             target = post_file;
         else if(target){
             strncpy(target,argv[index],MAXSTR);
+            target = NULL;
         }else{
             target = NULL;
             fprintf(stderr,"Unexpected parameter \"%s\"\n", argv[index]);

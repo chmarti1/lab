@@ -1528,8 +1528,8 @@ int read_file_stream(DEVCONF* dconf, const unsigned int devnum){
     // Write data one element at a time.
     for(row=0; row<FS->samples_per_read; row++){
         for(ainum=0; ainum<dconf[devnum].naich-1; ainum++)
-            fprintf(FS->file, "%8f\t", FS->buffer[ index++ ]);
-        fprintf(FS->file, "%8f\n", FS->buffer[ index++ ]);
+            fprintf(FS->file, "%.6e\t", FS->buffer[ index++ ]);
+        fprintf(FS->file, "%.6e\n", FS->buffer[ index++ ]);
     }
     return err;
 }

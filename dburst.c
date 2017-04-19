@@ -89,9 +89,10 @@ const char help_text[] = \
 int main(int argc, char *argv[]){
     double *buffer;
     int reads,  // number of packets to read
-        read_size,  // total number of samples in each packet
+        read_size,  // total number of samples for all channels in each packet
         nich, // number of channels in the operation
-        count; // a counter for loops
+        count, // a counter for loops
+        col;    // column counter for data loop
     long int buffer_bytes;  // requested buffer size in bytes
     double temp;
     time_t now;
@@ -201,13 +202,14 @@ int main(int argc, char *argv[]){
         close_config(dconf,0);
         return -1;
     }
+    printf("DONE\n");
 
     // Log the time
     time(&now);
 
     // Start the data stream
     if(start_data_stream(dconf, 0, -1)){
-        fprintf(stderr, "DBURST failed to start data collection.\n");
+        fprintf(stderr, "\nDBURST failed to start data collection.\n");
         close_config(dconf,0);
         free(buffer);
         return -1;
@@ -218,7 +220,7 @@ int main(int argc, char *argv[]){
     fflush(stdout);
     for(count=0; count<reads; count++){
         if(read_data_stream(dconf, 0, &buffer[read_size*count])){
-            fprintf(stderr, "DBURST failed while trying to read the preliminary data!\n");
+            fprintf(stderr, "\nDBURST failed while trying to read the preliminary data!\n");
             stop_file_stream(dconf,0);
             close_config(dconf,0);
             free(buffer);
@@ -227,11 +229,10 @@ int main(int argc, char *argv[]){
         printf("%d.",count);
         fflush(stdout);
     }
-    printf("done.\n");
 
     // Halt data collection
     if(stop_file_stream(dconf, 0)){
-        fprintf(stderr, "DBURST failed to halt preliminary data collection!\n");
+        fprintf(stderr, "\nDBURST failed to halt preliminary data collection!\n");
         close_config(dconf,0);
         free(buffer);
         return -1;
@@ -240,20 +241,34 @@ int main(int argc, char *argv[]){
     printf("DONE\n");
 
     // Open the output file
+    printf("Writing the data file...");
+    fflush(stdout);
     dfile = fopen(data_file,"w");
     if(dfile == NULL){
+        free(buffer);
         printf("FAILED\n");
         fprintf(stderr, "DBURST failed to open the data file \"%s\"\n", data_file);
         return -1;
     }
+
     // Write the configuration header
     write_config(dconf,0,dfile);
     // Write the time data colleciton started
     fprintf(dfile, "#: %s", ctime(&now));
-
-    
-    free(buffer);
+    // Write the samples
+    count = 0;
+    while(count<reads*read_size){
+        for(col=0; col<nich-1; col++){
+            fprintf(dfile, "%.6e ",buffer[count]);
+            count++;
+        }
+        fprintf(dfile, "%.6e\n",buffer[count]);
+        count++;
+    }
     fclose(dfile);
+    printf("DONE\n");
+
+    free(buffer);
     printf("Exited successfully.\n");
     return 0;
 }

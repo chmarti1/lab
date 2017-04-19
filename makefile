@@ -17,3 +17,8 @@ ivchar.bin: lconfig.o ivchar.c
 drun: lconfig.o drun.c
 	gcc lconfig.o drun.c $(LINK) -o drun
 	chmod +x drun
+
+dburst: lconfig.o dburst.c
+	gcc lconfig.o dburst.c $(LINK) -o dburst
+	chmod +x dburst
+

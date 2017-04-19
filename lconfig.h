@@ -79,7 +79,7 @@ readability.
 
 **2.02
 4/10/2017
-Added NDEV_CONFIG
+Added ndev_config()
 */
 
 #define TWOPI 6.283185307179586
@@ -222,6 +222,22 @@ typedef struct devconf {
 .
 */
 
+
+/* NDEV_CONFIG
+Return the number of configured device connections in a DEVCONF array.
+Counts until it finds a device with a connection index less than 0 (indicating
+that it was never configured) or until the devmax limit is reached.  That means
+that NDEV_CONFIG will be fooled if DEVCONF elements are not configured 
+sequentially.  Fortunately, load_config always works sequentially.
+*/
+int ndev_config(DEVCONF* dconf, // Array of device configuration structs
+                const unsigned int devmax); // maximum number of devices allowed
+
+/* NISTREAM_CONFIG
+Returns the number of input stream channels configured. These will be the number 
+of columns of data discovered in the data when streaming.
+*/
+int nistream_config(DEVCONF* dconf, const unsigned int devnum);
 
 /* LOAD_CONFIG
 Load a file by its file name.
@@ -370,17 +386,6 @@ Parameters are not case sensitive.  The following parameters are recognized:
 int load_config(DEVCONF* dconf,         // array of device configuration structs
                 const unsigned int devmax, // maximum number of devices to load
                 const char* filename);  // name of the file to read
-
-
-/* NDEV_CONFIG
-Return the number of configured device connections in a DEVCONF array.
-Counts until it finds a device with a connection index less than 0 (indicating
-that it was never configured) or until the devmax limit is reached.  That means
-that NDEV_CONFIG will be fooled if DEVCONF elements are not configured 
-sequentially.  Fortunately, load_config always works sequentially.
-*/
-int ndev_config(DEVCONF* dconf, // Array of device configuration structs
-                const unsigned int devmax); // maximum number of devices allowed
 
 
 /* WRITE_CONFIG

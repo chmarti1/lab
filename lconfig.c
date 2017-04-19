@@ -146,6 +146,27 @@ void clean_file_stream(FILESTREAM* FS){
 
 /*....................................
 .
+.   Diagnostic
+.       "Public" functions
+.
+......................................*/
+
+int nistream_config(DEVCONF* dconf, const unsigned int devnum){
+    return dconf[devnum].naich;
+}
+
+
+int ndev_config(DEVCONF* dconf, const unsigned int devmax){
+    int ii;
+    for(ii=0; ii<devmax; ii++)
+        if(dconf[ii].connection<0)
+            return ii;
+    return devmax;
+}
+
+
+/*....................................
+.
 .   Algorithm Definition
 .       "Public" functions
 .
@@ -550,16 +571,6 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
     return LCONF_ERROR;
 }
 
-
-
-
-int ndev_config(DEVCONF* dconf, const unsigned int devmax){
-    int ii;
-    for(ii=0; ii<devmax; ii++)
-        if(dconf[ii].connection<0)
-            return ii;
-    return devmax;
-}
 
 
 

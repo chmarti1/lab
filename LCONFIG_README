@@ -152,14 +152,36 @@ aoamplitude     The signal amplitude (1/2 pk-pk)
 aooffset        The signal offset
 aoduty          Duty cycle for square and triangle (0<= duty <=1)
 
-The last class of parameters recognized by version 1.1 is "meta."  Meta 
-parameters are not inherently recognized by LCONFIG, but might be used by the host 
-application.  As a result, the configuration file needs to specify what kind of
-data the parameter uses.
+The last class of parameters recognized as of version 1.1 is "meta."  Meta 
+parameters are not inherently recognized by LCONFIG, but might be used by the  
+host application.  For example, meta parameters might describe which equipment
+was used, the condition of an experiment, references to other measurements, 
+etc.  Because meta parameters are not hard-coded to be understood by LCONFIG,
+the config file needs to tell LCONFIG the format of the data (integer, float,
+or string).  There are two ways to do this.
 
-int:param   5       creates an integer named "param" and stores 5 in it
-flt:param   5.1     creates a double named "param" and stores 5.1 in it
-str:param   five    creates a string named "param" and stores "five" in it
+In version 2.01, meta parameters are identified in stanzas:
+"""
+meta flt        # Begins a stanza of floats ("meta float" also accepted)
+height 5.5      # All unrecognized parameters are new meta floats
+weight 145.
+meta int        # Begins a stanza of integers ("meta integer" works too)
+age 26
+meta str        # Begins a stanza of strings ("meta string" works too)
+name Milo
+meta end        # Closes the meta stanzas. Now unrecognized paramers cause
+                # errors as they should.
+"""
+
+The legacy method for defining meta parameters still works in version 2.01.
+Here, each parameter is given a three character type prefix separated by a 
+colon.  These can appear in or out of the new-style stanzas.  They will be 
+interpreted the same regardless of whether they agree with the stanza type.
+"""
+int:param   5       # creates an integer named "param" and stores 5 in it
+flt:param   5.1     # creates a double named "param" and stores 5.1 in it
+str:param   five    # creates a string named "param" and stores "five" in it
+"""
 
 To learn how to interact with meta parameters, see the get_meta_XXX() and 
 put_meta_XXX() functions in lconfig.h.

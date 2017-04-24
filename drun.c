@@ -8,9 +8,9 @@
 #define PRE_FILE    "drun_pre.dat"
 #define POST_FILE   "drun_post.dat"
 #define DATA_FILE   "drun.dat"
+#define MAXLOOP     "-1"
 #define NBUFFER     65535
 #define NDEV        3
-#define MAXLOOP     2000
 #define MAXSTR      128
 
 /*...................
@@ -19,7 +19,10 @@
 char    pre_file[MAXSTR] = PRE_FILE,   // The pre-stream data file name
         post_file[MAXSTR] = POST_FILE,  // The post-stream data file
         data_file[MAXSTR] = DATA_FILE,  // The data file
-        config_file[MAXSTR] = CONFIG_FILE;  //  The configuration file
+        config_file[MAXSTR] = CONFIG_FILE,  //  The configuration file
+        maxloop[MAXSTR] = MAXLOOP;  // maximum number of reads
+
+int     maxloop_i;
 
 /*....................
 . Prototypes
@@ -76,6 +79,14 @@ const char help_text[] = \
 "  \"drun_post.dat\"\n"\
 "     $ drun -p myprefile.dat\n"\
 "\n"\
+"-n MAXREAD\n"\
+"  This option accepts an integer number of read operations after which\n"\
+"  the data collection will be halted.  The number of samples collected\n"\
+"  in each read operation is determined by the NSAMPLE parameter in the\n"\
+"  configuration file.  The maximum number of samples allowed per channel\n"\
+"  will be MAXREAD*NSAMPLE.  By default, the MAXREAD option is disabled.\n"\
+"\n"\
+"     $ drun -p myprefile.dat\n"\
 "(c)2017 C.Martin\n";
 
 
@@ -179,7 +190,7 @@ int main(int argc, char *argv[]){
     printf("Press \"Q\" to quit the process\nStreaming measurements...");
     setup_keypress();
     go = 1;
-    for(count=0; go && count<MAXLOOP; count++){
+    for(count=0; go; count++){
         if(read_file_stream(dconf, stream_dev)){
             printf("FAILED\n");
             fprintf(stderr, "DRUN failed while trying to read the data stream!\n");
@@ -191,6 +202,8 @@ int main(int argc, char *argv[]){
 
         // Test for exit conditions
         if(keypress() && getchar() == 'Q')
+            go = 0;
+        else if(maxloop_i>0 && count>=maxloop_i)
             go = 0;
     }
     finish_keypress();
@@ -275,6 +288,12 @@ int parse_options(int argc, char* argv[]){
             fprintf(stderr,"Unexpected parameter \"%s\"\n", argv[index]);
             return -1;
         }
+    }
+
+    // Postprocessing: convert the MAXLOOP parameter into an integer
+    if(sscanf(maxloop, "%d", &maxloop_i) != 1){
+        fprintf(stderr,"Illegal value for -n parameter: %s\n",maxloop);
+        return -1;
     }
     return 0;
 }

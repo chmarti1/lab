@@ -5,7 +5,7 @@ Headers and codes for laboratory measurements and machine control with the
 
 By Chris Martin [crm28@psu.edu](mailto:crm28@psu.edu)
 
-Version 1.2
+Version 2.01
 
 ## About
 In the summer of 2016, I realized I needed to be able to adjust my data 
@@ -38,6 +38,4 @@ grab the device connection handle and do that yourself.
     err = LJM_eWriteName(handle, "RegisterName", ..value..);
 
 ## Known Bugs
-As of Version 1.2, the analog output streaming only behaves properly when a 
-single channel is configured at a time.  The discussion is 
-[here](https://labjack.com/forums/t7/clarity-t7-output-streaming).
+No persisting known bugs.

@@ -86,7 +86,7 @@ Added ndev_config()
 
 #define LCONF_MAX_STR 32    // longest supported string
 #define LCONF_MAX_READ "%32s"
-#define LCONF_MAX_META 16   // how many meta parameters should we allow?
+#define LCONF_MAX_META 32   // how many meta parameters should we allow?
 #define LCONF_MAX_STCH 15   // maximum number of streaming channels allowed (LCONF_MAX_NAICH + LCONF_MAX_NAOCH)
 #define LCONF_MAX_AOCH 1    // maximum analog output channel number allowed
 #define LCONF_MAX_NAOCH 2   // maximum analog output channels to allow

@@ -20,9 +20,10 @@ char    pre_file[MAXSTR] = PRE_FILE,   // The pre-stream data file name
         post_file[MAXSTR] = POST_FILE,  // The post-stream data file
         data_file[MAXSTR] = DATA_FILE,  // The data file
         config_file[MAXSTR] = CONFIG_FILE,  //  The configuration file
-        maxloop[MAXSTR] = MAXLOOP;  // maximum number of reads
+        maxloop[MAXSTR] = MAXLOOP,  // maximum number of reads
+        metastage[LCONF_MAX_META][MAXSTR+1];
 
-int     maxloop_i;
+int     maxloop_i, metacount;
 
 /*....................
 . Prototypes
@@ -35,7 +36,8 @@ int parse_options(int argc, char*argv[]);
 . Help text
 .....................*/
 const char help_text[] = \
-"drun [-h] [-r PREFILE] [-p POSTFILE] [-d DATAFILE] [-c CONFIGFILE]\n"\
+"drun [-h] [-r PREFILE] [-p POSTFILE] [-d DATAFILE] [-c CONFIGFILE] \n"\
+"     [-f|i|s param=value]\n"\
 "  Runs a data acquisition job until the user exists with a keystroke.\n"\
 "\n"\
 "PRE and POST data collection\n"\
@@ -77,7 +79,7 @@ const char help_text[] = \
 "-p POSTFILE\n"\
 "  This option overrides the default post-continuous data file name\n"\
 "  \"drun_post.dat\"\n"\
-"     $ drun -p myprefile.dat\n"\
+"     $ drun -p mypostfile.dat\n"\
 "\n"\
 "-n MAXREAD\n"\
 "  This option accepts an integer number of read operations after which\n"\
@@ -86,7 +88,14 @@ const char help_text[] = \
 "  configuration file.  The maximum number of samples allowed per channel\n"\
 "  will be MAXREAD*NSAMPLE.  By default, the MAXREAD option is disabled.\n"\
 "\n"\
-"     $ drun -p myprefile.dat\n"\
+"-f param=value\n"\
+"-i param=value\n"\
+"-s param=value\n"\
+"  These flags signal the creation of a meta parameter at the command\n"\
+"  line.  f,i, and s signal the creation of a float, integer, or string\n"\
+"  meta parameter that will be written to the data file header.\n"\
+"     $ drun -f height=5.25 -i temperature=22 -s day=Monday\n"\
+"\n"\
 "(c)2017 C.Martin\n";
 
 
@@ -98,6 +107,10 @@ int main(int argc, char *argv[]){
                 // NDEV is the maximum 
     int stream_dev = 0; // which device will be used for streaming?
     char go;    // Flag for whether to continue the stream loop
+    char param[MAXSTR];
+    double ftemp;
+    int itemp;
+    char stemp[MAXSTR];
     unsigned int count; // count the number of loops for safe exit
     DEVCONF dconf[NDEV];
 
@@ -116,6 +129,44 @@ int main(int argc, char *argv[]){
 
     // Detect the number of configured device connections
     ndev = ndev_config(dconf, NDEV);
+
+    // Process the staged command-line meta parameters
+    for(metacount--; metacount>=0; metacount--){
+        if(metastage[metacount][0]=='f'){
+            if(sscanf(&metastage[metacount][1],"%[^=]=%lf",(char*)&param, &ftemp) != 2){
+                fprintf(stderr, "DRUN expected param=float format, but found %s\n", &metastage[metacount][1]);
+                return -1;
+            }
+            printf("flt:%s = %lf\n",param,ftemp);
+            if (put_meta_flt(dconf, 0, param, ftemp) || 
+                put_meta_flt(dconf, 1, param, ftemp) ||
+                put_meta_flt(dconf, 2, param, ftemp))
+                fprintf(stderr, "DRUN failed to set parameter %s to %lf\n", param, ftemp);
+        }else if(metastage[metacount][0]=='i'){
+            if(sscanf(&metastage[metacount][1],"%[^=]=%d",(char*)&param, &itemp) != 2){
+                fprintf(stderr, "DRUN expected param=integer format, but found %s\n", &metastage[metacount][1]);
+                return -1;
+            }
+            printf("int:%s = %d\n",param,itemp);
+            if (put_meta_int(dconf, 0, param, itemp) || 
+                put_meta_int(dconf, 1, param, itemp) ||
+                put_meta_int(dconf, 2, param, itemp))
+                fprintf(stderr, "DRUN failed to set parameter %s to %d\n", param, itemp);
+        }else if(metastage[metacount][0]=='s'){
+            if(sscanf(&metastage[metacount][1],"%[^=]=%s",(char*)&param, (char*)&stemp) != 2){
+                fprintf(stderr, "DRUN expected param=string format, but found %s\n", &metastage[metacount][1]);
+                return -1;
+            }
+            printf("flt:%s = %s\n",param,stemp);
+            if (put_meta_str(dconf, 0, param, stemp) || 
+                put_meta_str(dconf, 1, param, stemp) ||
+                put_meta_str(dconf, 2, param, stemp))
+                fprintf(stderr, "DRUN failed to set parameter %s to %s\n", param, stemp);
+        }else{
+            fprintf(stderr, "DRUN unexpected error parsing staged command-line meta parameters!\n");
+            return -1;
+        }
+    }
 
     if(ndev<=0){
         fprintf(stderr,"DRUN did not detect any valid devices for data acquisition.\n");
@@ -264,6 +315,8 @@ int parse_options(int argc, char* argv[]){
     int index;
     char* target=NULL;
 
+    metacount = 0;
+
     // The target pointer indicates to what global parameter string values
     // will be written.  Option flags refocus the pointer and writing a value
     // will swing the pointer back to NULL.
@@ -280,7 +333,19 @@ int parse_options(int argc, char* argv[]){
             target = config_file;
         else if(strncmp(argv[index],"-p",MAXSTR)==0)
             target = post_file;
-        else if(target){
+        else if(strncmp(argv[index],"-f",MAXSTR)==0 ||
+                strncmp(argv[index],"-i",MAXSTR)==0 ||
+                strncmp(argv[index],"-s",MAXSTR)==0){
+            if(metacount>LCONF_MAX_META){
+                target=NULL;
+                fprintf(stderr,"Too many meta parameters. LCONFIG only accepts %d.\n",LCONF_MAX_META);
+            }
+            // Write the type specifier as the first character
+            metastage[metacount][0] = argv[index][1];
+            // Copy the remaining text behind
+            target = &metastage[metacount][1];
+            metacount++;
+        }else if(target){
             strncpy(target,argv[index],MAXSTR);
             target = NULL;
         }else{
@@ -295,5 +360,6 @@ int parse_options(int argc, char* argv[]){
         fprintf(stderr,"Illegal value for -n parameter: %s\n",maxloop);
         return -1;
     }
+
     return 0;
 }

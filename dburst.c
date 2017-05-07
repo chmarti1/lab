@@ -19,8 +19,9 @@
 char    config_file[MAXSTR] = DEF_CONFIGFILE,
         data_file[MAXSTR] = DEF_DATAFILE,
         samples[MAXSTR] = DEF_SAMPLES,
-        duration[MAXSTR] = DEF_DURATION;
-int samples_i, duration_i;
+        duration[MAXSTR] = DEF_DURATION,
+        metastage[LCONF_MAX_META][MAXSTR+1];
+int samples_i, duration_i, metacount;
 
 /*....................
 . Prototypes
@@ -34,6 +35,7 @@ int parse_options(int argc, char*argv[]);
 .....................*/
 const char help_text[] = \
 "dburst [-h] [-c CONFIGFILE] [-n SAMPLES] [-t DURATION] [-d DATAFILE]\n"\
+"     [-f|i|s param=value]\n"\
 "  Runs a single high-speed burst data colleciton operation. Data are\n"\
 "  streamed directly into ram and then saved to a file after collection\n"\
 "  is complete.  This allows higher data rates than streaming to the hard\n"\
@@ -42,6 +44,14 @@ const char help_text[] = \
 "-c CONFIGFILE\n"\
 "  Specifies the LCONFIG configuration file to be used to configure the\n"\
 "  LabJack T7.  By default, DBURST will look for dburst.conf\n"\
+"\n"\
+"-f param=value\n"\
+"-i param=value\n"\
+"-s param=value\n"\
+"  These flags signal the creation of a meta parameter at the command\n"\
+"  line.  f,i, and s signal the creation of a float, integer, or string\n"\
+"  meta parameter that will be written to the data file header.\n"\
+"     $ drun -f height=5.25 -i temperature=22 -s day=Monday\n"\
 "\n"\
 "-n SAMPLES\n"\
 "  Specifies the integer number of samples per channel desired.  This\n"\
@@ -94,7 +104,9 @@ int main(int argc, char *argv[]){
         count, // a counter for loops
         col;    // column counter for data loop
     long int buffer_bytes;  // requested buffer size in bytes
-    double temp;
+    double ftemp;
+    int itemp;
+    char stemp[MAXSTR], param[MAXSTR];
     time_t now;
     struct sysinfo sinf;
     FILE *dfile;
@@ -121,6 +133,38 @@ int main(int argc, char *argv[]){
     // Detect the number of input columns
     nich = nistream_config(dconf, 0);
 
+    // Process the staged command-line meta parameters
+    for(metacount--; metacount>=0; metacount--){
+        if(metastage[metacount][0]=='f'){
+            if(sscanf(&metastage[metacount][1],"%[^=]=%lf",(char*)&param, &ftemp) != 2){
+                fprintf(stderr, "DRUN expected param=float format, but found %s\n", &metastage[metacount][1]);
+                return -1;
+            }
+            printf("flt:%s = %lf\n",param,ftemp);
+            if (put_meta_flt(dconf, 0, param, ftemp))
+                fprintf(stderr, "DRUN failed to set parameter %s to %lf\n", param, ftemp);
+        }else if(metastage[metacount][0]=='i'){
+            if(sscanf(&metastage[metacount][1],"%[^=]=%d",(char*)&param, &itemp) != 2){
+                fprintf(stderr, "DRUN expected param=integer format, but found %s\n", &metastage[metacount][1]);
+                return -1;
+            }
+            printf("int:%s = %d\n",param,itemp);
+            if (put_meta_int(dconf, 0, param, itemp))
+                fprintf(stderr, "DRUN failed to set parameter %s to %d\n", param, itemp);
+        }else if(metastage[metacount][0]=='s'){
+            if(sscanf(&metastage[metacount][1],"%[^=]=%s",(char*)&param, (char*)&stemp) != 2){
+                fprintf(stderr, "DRUN expected param=string format, but found %s\n", &metastage[metacount][1]);
+                return -1;
+            }
+            printf("str:%s = %s\n",param,stemp);
+            if (put_meta_str(dconf, 0, param, stemp))
+                fprintf(stderr, "DRUN failed to set parameter %s to %s\n", param, stemp);
+        }else{
+            fprintf(stderr, "DRUN unexpected error parsing staged command-line meta parameters!\n");
+            return -1;
+        }
+    }
+
     // Calculate the buffer size required
     // If neither the sample nor duration option is configured
     // Default to a single read operation
@@ -146,31 +190,31 @@ int main(int argc, char *argv[]){
     printf("  Stream channels : %d\n", nich);
     printf("      Sample rate : %.1fHz\n", dconf[0].samplehz);
     printf(" Samples per chan : %d (%d requested)\n", reads*dconf[0].nsample, samples_i);
-    temp = (double) buffer_bytes;
-    if(temp>1024){
-        temp/=1024;
-        if(temp>1024){
-            temp/=1024;
-            printf("      Buffer size : %dMiB\n", (int)temp);
+    ftemp = (double) buffer_bytes;
+    if(ftemp>1024){
+        ftemp/=1024;
+        if(ftemp>1024){
+            ftemp/=1024;
+            printf("      Buffer size : %dMiB\n", (int)ftemp);
         }else
-            printf("      Buffer size : %dKiB\n", (int)temp);
+            printf("      Buffer size : %dKiB\n", (int)ftemp);
     }else
-        printf("      Buffer size : %dB\n", (int)temp);
+        printf("      Buffer size : %dB\n", (int)ftemp);
     printf("Samples per packet: %d\n", read_size);
     printf("          Packets : %d\n", reads);
-    temp = reads*dconf[0].nsample/dconf[0].samplehz;
-    if(temp>60){
-        temp /= 60;
-        if(temp>60){
-            temp /= 60;
-            printf("    Test duration : %fhr (%s requested)\n", (float)(temp), duration);
+    ftemp = reads*dconf[0].nsample/dconf[0].samplehz;
+    if(ftemp>60){
+        ftemp /= 60;
+        if(ftemp>60){
+            ftemp /= 60;
+            printf("    Test duration : %fhr (%s requested)\n", (float)(ftemp), duration);
         }else{
-            printf("    Test duration : %fmin (%s requested)\n", (float)(temp), duration);
+            printf("    Test duration : %fmin (%s requested)\n", (float)(ftemp), duration);
         }
-    }else if(temp<1)
-        printf("    Test duration : %fms (%s requested)\n", (float)(temp*1000), duration);
+    }else if(ftemp<1)
+        printf("    Test duration : %fms (%s requested)\n", (float)(ftemp*1000), duration);
     else
-        printf("    Test duration : %fs (%s requested)\n", (float)(temp), duration);
+        printf("    Test duration : %fs (%s requested)\n", (float)(ftemp), duration);
 
     // Check current RAM status
     sysinfo(&sinf);
@@ -296,7 +340,19 @@ int parse_options(int argc, char* argv[]){
             target = samples;
         else if(strncmp(argv[index],"-d",MAXSTR)==0)
             target = data_file;
-        else if(target){
+        else if(strncmp(argv[index],"-f",MAXSTR)==0 ||
+                strncmp(argv[index],"-i",MAXSTR)==0 ||
+                strncmp(argv[index],"-s",MAXSTR)==0){
+            if(metacount>LCONF_MAX_META){
+                target=NULL;
+                fprintf(stderr,"Too many meta parameters. LCONFIG only accepts %d.\n",LCONF_MAX_META);
+            }
+            // Write the type specifier as the first character
+            metastage[metacount][0] = argv[index][1];
+            // Copy the remaining text behind
+            target = &metastage[metacount][1];
+            metacount++;
+        }else if(target){
             strncpy(target,argv[index],MAXSTR);
             target = NULL;
         }else{

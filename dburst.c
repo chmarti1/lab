@@ -90,6 +90,7 @@ const char help_text[] = \
 "  which ever results in the longest test will be used.  If neither is\n"\
 "  specified, then DBURST will collect one packet worth of data.\n"\
 "\n"\
+"GPLv3\n"\
 "(c)2017 C.Martin\n";
 
 

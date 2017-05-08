@@ -127,6 +127,7 @@ IP          The device's IP address (192.168.0.10)
 gateway     IP address of the subnet's gateway (only used in USB) (192.168.0.1)
 subnet      The subnet mask of the subnet (only used in USB) (255.255.255.0)
 samplehz    The stream sample rate in Hz (100)
+settleus    The settling time in microseconds (10)
 
 Analog inputs are configured individually.  Each of the global parameters above 
 only appear once in a configuration file, but these can appear multiple times.

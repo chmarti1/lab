@@ -79,7 +79,8 @@ readability.
 
 **2.02
 4/10/2017
-Added ndev_config()
+Added ndev_config() to detect the number of devices loaded from a configuration
+file.
 */
 
 #define TWOPI 6.283185307179586
@@ -338,9 +339,13 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   AOCH paramter must appear before any AO configuration parameters.
 -AOSIGNAL
 .   The Analog Output Signal is the type of signal to be generated.  Valid
-.   options are CONSTANT, SINE, SQUARE, and TRIANGLE.  In order to generate 
-.   a sawtooth wave, select TRIANGLE, and adjust the duty cycle to 1 or 0.  
-.   See AODUTY.
+.   options are CONSTANT, SINE, SQUARE, TRIANGLE, and NOISE.  In order to 
+.   generate a sawtooth wave, select TRIANGLE, and adjust the duty cycle to 
+.   1 or 0.  See AODUTY.
+.
+.   The NOISE parameter generates a series of random samples and repeats the
+.   sequence at the frequency AOFREQUENCY.  This creates a signal with quasi-
+.   even frequency content between SAMPLEHZ and AOFREQUENCY.
 -AOFREQUENCY
 .   The Analog Output Freqeuncy expects a floating point number in Hz.  Great
 .   care should be taken to ensure that this is a number compatible with the

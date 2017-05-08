@@ -96,6 +96,7 @@ const char help_text[] = \
 "  meta parameter that will be written to the data file header.\n"\
 "     $ drun -f height=5.25 -i temperature=22 -s day=Monday\n"\
 "\n"\
+"GPLv3\n"\
 "(c)2017 C.Martin\n";
 
 
@@ -168,6 +169,7 @@ int main(int argc, char *argv[]){
         }
     }
 
+    // Verify that there are any configurations to execute
     if(ndev<=0){
         fprintf(stderr,"DRUN did not detect any valid devices for data acquisition.\n");
         return -1;

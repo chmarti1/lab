@@ -155,6 +155,10 @@ int nistream_config(DEVCONF* dconf, const unsigned int devnum){
     return dconf[devnum].naich;
 }
 
+int nostream_config(DEVCONF* dconf, const unsigned int devnum){
+    return dconf[devnum].naoch;
+}
+
 
 int ndev_config(DEVCONF* dconf, const unsigned int devmax){
     int ii;

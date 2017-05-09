@@ -240,6 +240,12 @@ of columns of data discovered in the data when streaming.
 */
 int nistream_config(DEVCONF* dconf, const unsigned int devnum);
 
+/* NOSTREAM_CONFIG
+Returns the number of output stream channels configured. These will be the number 
+of columns of data discovered in the data when streaming.
+*/
+int nostream_config(DEVCONF* dconf, const unsigned int devnum);
+
 /* LOAD_CONFIG
 Load a file by its file name.
 The file should be constructed with parameter-value sets separated by 

@@ -7,14 +7,23 @@ By Chris Martin [crm28@psu.edu](mailto:crm28@psu.edu)
 
 Version 2.02
 
-## About
+- [About](#about)
+- [Getting started](#start)
+- [Anatomy of an LCONFIG configuration file](#config)
+- [Anatomy of a data file](#data)
+- [Table of configuration parameters](#params)
+- [The LCONFIG data types](#types)
+- [The LCONFIG functions](#functions)
+- [The LCONFIG header constants](#constants)
+
+## <a name="about"></a> About
 In the summer of 2016, I realized I needed to be able to adjust my data 
 acquisition parameters day-by-day as I was tweaking and optimizing an 
 experiment.  I love my LabJack, and the folks at LabJack do a great job of documenting their intuitive interface.  HOWEVER, most of us don't memorize dozens of modbus registers, and weeks after an experiment it's often difficult to remember which data file was taken with which DAQ parameters.
 
 This little **L**aboratory **CONFIG**uration system reads and writes configuration and data files, connects to and configures the T7, and automates the jobs I've done most.  As of version 2.02, that includes analog input streaming and analog output simulating a function generator.
 
-## Getting Started
+## <a name="start"></a> Getting started
 If you just want to be able to take some quick data, then `drun` and `dburst` will probably work.  
 ```
     $ make drun
@@ -28,7 +37,7 @@ For writing your own executables, an overview of the LCONFIG system is laid out 
 
 Once you produce your data, there's a good chance that you'll want to analyze it.  If you're a Python user, the lconfig.py module will get you up and running quickly.  Its documentation is inline.
 
-## Anatomy of an LCONFIG configuration file
+## <a name="config"></a> Anatomy of an LCONFIG configuration file
 A configuration file has MANY optional contents, but all configuration files will have a few things in common.  ALL configuration directives have the same format; a parameter followed by a value separated by whitespace.
 ```
 # Configuration files can contain comments
@@ -73,7 +82,7 @@ function encounters ##.  This text isn't commented because
 it will never be read by load_config()
 ```
 
-## Anatomy of a data file
+## <a name="data"></a> Anatomy of a data file
 Data files are written with the device configuration that was used to collect the data embedded in the file's header.  Because ## ends the configuration section, `load_config()` can open a data file just as easily as it can a configuration file.  That means an experiment can be run to repeat prior data simply by specifying the prior data file as the configuration file.
 
 Below are the first 26 lines of a data file.  The configuration section is terminated by the ## flag, and the date and time at which the measurement was started is recorded behind a #: prefix. 
@@ -109,7 +118,7 @@ airesolution 0
 ...
 ```
 
-## Table of Parameters
+## <a name="params"></a> Table of Parameters
 These are the parameters recognized by LCONFIG.  The valid values list the values or classes of values that each parameter can legally be assigned.  The scope indicates where those values are applied.  Global scope parameters are always overwritten if they are repeated, but AI and AO parameters are written to which ever channel is active, and there may be many.
 
 | Parameter   | Valid Values                            | Scope        | Description
@@ -125,6 +134,7 @@ These are the parameters recognized by LCONFIG.  The valid values list the value
 | aichannel   | integer [0-13]                          | Analog Input | The physical analog input channel number
 | ainegative  | [0-13], 199, ground, differential       | Analog Input | The physical channel to use as the negative side of the measurement.  199 and ground both indicate a single-ended measurement.  The T7 requires that negative channels be the odd channel one greater than the even positive counterpart (e.g. 0+ 1- or 8+ 9-).  Specify differential to make that selection automatic.
 | airange     | float [.01, .1, 1., 10.]                | Analog Input  | The bipolar (+/-) voltage range for the measurement.  The T7 can accept four values.
+| airesolution| integer 
 | aochannel   | integer [0,1]                           | Analog Output | The physical analog output (DAC) channel to use for pseudo function generator output.
 | aosignal    | constant, sine, square, triangle, noise | Analog Output | The type of cyclic signal to generate
 | aoamplitude | floating point                          | Analog Output | Voltage amplitude of the AC component of the signal (ignored for constant signal).
@@ -136,15 +146,274 @@ These are the parameters recognized by LCONFIG.  The valid values list the value
 | int:param   | integer                                 | Meta | Specifies a single integer parameter
 | str:param   | string                                  | Meta | Specifies a single string parameter
 
-## Future Improvements
-One day, LCONFIG will include automatic digital configuration and a layer for
-writing the some of the T7 modbus registers.  As things stand, you have to go
-grab the device connection handle and do that yourself.
-```c
-    int err, handle;
-    handle = dconf[0].handle;
-    err = LJM_eWriteName(handle, "RegisterName", ..value..);
+## <a name="types"></a> LCONFIG data types
+These are the data types provided by `lconfig.h`.
+
+### AICONF Struct
+Holds data relevant to the configuration of a single analog input channel
+
+| Member | Type | Description
+|------|:---:|------
+| channel  | `unsigned int` | The physical channel number
+| nchannel | `unsigned int` | The physical number of the negative channel
+| range    | `double`       | The bipolar range (.01, .1, 1, 10)
+| resolution | `unsigned int` | The channel's resolution index
+
+### AOCONF Struct
+A structure that holds data relevant to the configuration of a single analog output channel
+
+| Member | Type | Valid for | Default | Description
+|---|:---:|:---:|:---:|:---
+|channel | `unsigned int` | all | - | Specifies the physical DAC channel
+|signal | `enum AOSIGNAL` | all | - | Specifies the type of signal: `CONSTANT` (a DC signal with no AC), `SINE`, `SQUARE`, `TRIANGLE`, `NOISE` (a series of pseudo-random samples)
+|amplitude | `double` | `SINE`, `SQUARE`, `TRIANGLE`, `NOISE` | `LCONF_DEF_AO_AMP` | Specifies the amplitude (max-mean) of the AC signal component in volts
+|offset | `double` | all | `LCONF_DEF_AO_OFF` | Specifies a DC offset to superimpose with the signal in volts
+|frequency | `double` | all | - | Specifies the rate at which the signal should repeat in Hz. Should be large for `OFFSET`.  Determines the lowest frequency content in a `NOISE` signal.
+|duty | `double` | `SQUARE`, `TRIANGLE` | 0.5 | For a square wave, `duty` indicates the fractional time spent at the high value.  For a triangle wave, `duty` indicates the fractional time spent rising.
+
+### METACONF Struct
+A structure that defines a single meta parameter
+
+| Member | Subordinate | Type | Description 
+|---|---|:---:|:---
+|param | | `char[LCONF_MAX_STR]` | The string name of the meta parameter
+|value | | `union` | A union for containing the value as an integer, double, or string
+| | svalue | `char[LCONF_MAX_STR]` | A string value
+| | ivalue | `int` | An integer value
+| | fvalue | `double` | A floating point value
+|type | | `char` | A character indicating the meta type: `'f'` for float, `'i'` for int, or `'s'` for a string
+
+### FILESTREAM Struct
+A structure that holds the data needed to manage a data stream directly to a file.  This is used by the `file_stream_XXX` functions.
+
+| Member | Type | Description
+|---|:---:|---
+|file | `FILE*` | Pointer to the open data file
+|buffer | `double*` | Dynamically allocated buffer of samples.  The raw data are stored here as they are being written to the file.
+|samples_per_read | `unsigned int` | The number of samples to receive in each read from the T7.  This is the size of the buffer.
+
+### DEVCONF Struct
+This structure contains all of the information needed to configure a device.  This is the workhorse data type, and usually it is the only one that needs to be explicitly used in the host application.
+
+| Member | Type | Valid values | Description
+|---|:---:|:---:|---
+|connection | `int` | `LJM_ctUSB`, `LJM_ctETH`, `LJM_ctANY` | Integer corresponding to the connection type.  The values are those recognized by LabJack's `LJM_Open` function.
+|ip | `char[LCONF_MAX_STR]` | XXX.XXX.XXX.XXX | The T7's IP address.  Used to WRITE the IP address in USB mode, and used to find the device in ETH mode.
+|gateway | `char[LCONF_MAX_STR]` | XXX.XXX.XXX.XXX | The default TCP/IP gateway.
+|subnet | `char[LCONF_MAX_STR]` | XXX.XXX.XXX.XXX | The TCP/IP subnet mask.
+|serial | `char[LCONF_MAX_STR]` | decimal characters | The device serial number. Used to find the device in USB mode and only if an IP address is not supplied in ETH mode.
+|aich | `AICONF[LCONF_MAX_NAICH]` | - | An array of `AICONF` structs for configuring input channels.
+|naich | `unsigned int` | - | The number of aich entries that have been configured
+|aoch | `AOCONF[LCONF_MAX_NAOCH]` | - | An array of `AOCONF` structs for configuring output channels
+|naoch | `unsigned int` | - | The number of aoch entries that have been configured
+|handle | `int` | - | The device handle returned by the `LJM_Open` function
+|samplehz | `double`| positive frequency | The sample rate in Hz. This value will be overwritten with the ACTUAL device sample rate once an acquisition process has begun.
+|settleus | `double`| positive time | The multiplexer settling time for each sample in microseconds
+|nsample | `unsigned int` | - | Number of samples to read per each stream read operation
+|meta | `METACONF[LCONF_MAX_META]` | - | An array of meta configuration parameters
+|FS | `FILESTREAM` | - | The currently active file stream (if in use)
+
+## <a name="functions"></a> The LCONFIG functions
+
+| Function | Description
+|:---:|:---
+| **Interacting with Configuration Files** ||
+|load_config| Parses a configuration file and encodes the configuration on an array of DEVCONF structures
+|write_config| Writes a configuration file based on the configuration of a DEVCONF struct
+| **Device Interaction** ||
+|open_config| Opens a connection to the device identified in a DEVCONF configuration struct.  The handle is remembered by the DEVCONF struct.
+|close_config| Closes an open connection to the device handle in a DEVCONF configuration struct
+|upload_config| Perform the appropriate read/write operations to implement the DEVCONF struct settings on the T7
+|download_config| Populate a fresh DEVCONF structure to reflect a device's current settings.  Not all settings can be verified, so only some of the settings are faithfully represented.
+| **Configuration Diagnostics** ||
+|show_config| Calls download_config and automatically generates an item-by-item comparison of the T7's current settings and the settings contained in a DEVCONF structure.
+|ndev_config | Returns the number of configured devices in a DEVCONF array
+|nistream_config| Returns the number of configured input channels in a DEVCONF device structure
+| **Data Collection** ||
+|start_data_stream | Start a data collection process
+|read_data_stream | Read in data from an active data stream
+|stop_data_stream | Stop an active data stream
+|start_file_stream | Start a data stream directly to a file. File streams are slower than data streams.
+|read_file_stream | Read data from an active file stream directly to a file
+|stop_file_stream | Stop an active file stream
+| **Meta Configuration** ||
+| get_meta_int, get_meta_flt, get_meta_str | Returns a meta parameter integer, floating point, or string value.  
+| put_meta_int, put_meta_flt, put_meta_str | Write an integer, floating point, or a string value to a meta parameter.
+| **Helper Functions (Not needed by most users)** ||
+|clean_file_stream | Clean up after a file stream process; close the file and deallocate the buffer.  This is done automatically by `stop_file_stream`.
+|str_lower | Modify a string to be all lower case
+|airegisters | Returns the modbus registers relevant to configuring an analog input channel
+|aoregisters | Returns the modbus registers relevant to configuring an analog output channel
+|print_color | Used by the `show_config` function to print colored text to the terminal
+|read_param | Used by the `load_config` function to strip the whitespace around parameter/value pairs
+|init_config | Writes sensible defaults to a configuration struct
+
+###Interacting with Configuration Files
+```C
+int load_config(          DEVCONF* dconf, 
+                const unsigned int devmax, 
+                       const char* filename)
 ```
+`load_config` loads a configuration file into an array of DEVCONF structures.  Each instance of the `connection` parameter signals the configuration a new device.  `dconf` is an array of DEVCONF structs with `devmax` elements that will contain the configuration parameters found in the data file, `filename`.  The function returns either `LCONF_ERROR` or `LCONF_NOERR` depending on whether an error was raised during execution.
+
+```C
+void write_config(        DEVCONF* dconf, 
+                const unsigned int devnum, 
+                             FILE* ff)
+```
+`write_config` writes a configuration stanza to an open file, `ff`, for the parameters of devices number `devnum` in the array, `dconf`.  A DEVCONF structure written by `write_config` should result in an identical structure after being read by `load_config`.
+
+Rather than accept file names, `write_config` accepts an open file pointer so it is convenient for creating headers for data files (which don't need to be closed after the configuration is written).  It also means that the write operation doesn't need to return an error status.
+
+### Device Interaction
+```C
+int open_config(          DEVCONF* dconf, 
+                const unsigned int devnum)
+```
+`open_config` opens a connection to the device described in the `devnum` element of the `dconf` array.  The function returns either `LCONF_ERROR` or `LCONF_NOERR` depending on whether an error was raised during execution.
+
+
+
+```C
+int close_config(         DEVCONF* dconf, 
+                const unsigned int devnum)
+```
+`close_config` closes a connection to the device described in the `devnum` element of the `dconf` array.  The function returns either `LCONF_ERROR` or `LCONF_NOERR` depending on whether an error was raised during execution.
+
+```C
+int upload_config(        DEVCONF* dconf, 
+                const unsigned int devnum)
+```
+`upload_config` writes to the relevant modbus registers to assert the parameters in the `devnum` element of the `dconf` array.  The function returns either `LCONF_ERROR` or `LCONF_NOERR` depending on whether an error was raised during execution.
+
+```C
+int download_config(      DEVCONF* dconf, 
+                const unsigned int devnum, 
+                          DEVCONF* out)
+```
+`download_config` pulls values from the modbus registers of the open device connection in the `devnum` element of the `dconf` array to populate the parameters of the `out` DEVCONF struct.  This is a way to verify that the device parameters were successfully written or to see what operation was performed last.
+
+It is important to note that some of the DEVCONF members configure parameters that are not used until a data operation is executed (like `nsample` or `samplehz`).  These parameters can never be downloaded because they do not reside persistently on the T7.
+
+### Configuration Diagnostics
+```C
+int ndev_config(          DEVCONF* dconf, 
+                const unsigned int devmax)
+                
+int nistream_config(      DEVCONF* dconf, 
+                const unsigned int devnum)
+                
+int nostream_config(      DEVCONF* dconf, 
+                const unsigned int devnum)
+```
+The `ndev_config` returns the number of devices configured in the `dconf` array, returning a number no greater than `devmax`.  `nistream_config` and `nostream_config` return the number of input and ouptut stream channels configured.
+
+```C
+void show_config(         DEVCONF* dconf, 
+                const unsigned int devnum)
+```
+The `show_config` function calls `download_config` and prints a detailed color-coded comparison of live parameters against the configuration parameters in the `devnum` element of the `dconf` array.  Parameters that do not match are printed in red while parameters that agree with the configuration parameters are printed in green.
+
+### Data Collection
+```C
+int start_data_stream(    DEVCONF* dconf, 
+                const unsigned int devnum,
+                               int samples_per_read)
+
+int read_data_stream(     DEVCONF* dconf, 
+                const unsigned int devnum, 
+                            double *data)
+
+int stop_data_stream(     DEVCONF* dconf, 
+                const unsigned int devnum)
+```
+There are three steps to the data acquisition process; start, read, and stop.  `start_data_stream` starts the data collection process on the device `devnum` in the `dconf` array.  The device will be configured to transfer packets with `samples_per_read` samples per channel.  If `samples_per_read` is negative, then the `nsample` configuration parameter will be used instead.
+
+The `read_data_stream` function waits until a packet is available from the device and writes it to the `data` array.  Each call to `read_data_stream` will write `samples_per_read * nistream_config()` samples to the `data` array. This function must be called repeatedly and often enough to prevent a backlog of data.  If an excessive backlog builds higher than LCONF_BACKLOG_THRESHOLD samples, an error will be raised.
+
+The process is halted by the `stop_data_stream` function.
+
+```C
+int start_file_stream(    DEVCONF* dconf, 
+                const unsigned int devnum,
+                               int samples_per_read, 
+                        const char *filename)
+                        
+int read_file_stream(     DEVCONF* dconf, 
+                const unsigned int devnum)
+                
+int stop_file_stream(     DEVCONF* dconf, 
+                const unsigned int devnum)
+```
+Similar to the data stream functions, these file stream functions write samples directly to a formatted text file, and do not require a data buffer.
+
+### Meta Configuration
+```C
+int get_meta_int(          DEVCONF* dconf, 
+                 const unsigned int devnum,
+                        const char* param, 
+                               int* value)
+                               
+int get_meta_flt(          DEVCONF* dconf, 
+                 const unsigned int devnum,
+                        const char* param, 
+                            double* value)
+
+int get_meta_str(          DEVCONF* dconf, 
+                 const unsigned int devnum,
+                        const char* param, 
+                              char* value)
+```
+The `get_meta_XXX` functions retrieve meta parameters from the `devnum` element of the `dconf` array by their name, `param`.  If the parameter does not exist or if it is of the incorrect type, 
+The values are written to target of the `value` pointer, and the function returns the `LCONF_ERROR` or `LCONF_NOERR` error status based on whether the parameter was found.
+
+```C
+int put_meta_int(          DEVCONF* dconf, 
+                 const unsigned int devnum, 
+                        const char* param, 
+                                int value)
+                                
+int put_meta_flt(          DEVCONF* dconf, 
+                 const unsigned int devnum, 
+                        const char* param, 
+                             double value)
+
+int put_meta_str(          DEVCONF* dconf, 
+                 const unsigned int devnum, 
+                        const char* param, 
+                              char* value)
+```
+The `put_meta_XXX` functions retrieve meta parameters from the `devnum` element of the `dconf` array by their name, `param`.  The values are written to target of the `value` pointer, and the function returns the `LCONF_ERROR` or `LCONF_NOERR` error status based on whether the parameter was found.
+
+## <a name="constants"></a> Table of LCONFIG constants
+These are the compiler constants provided by `lconfig.h`.
+
+| Constant | Value | Description
+|--------|:-----:|-------------|
+| TWOPI  | 6.283185307179586 | 2*pi comes in handy for signal calculations
+| LCONF_VERSION | 2.02 | The floating point version
+| LCONF_MAX_STR | 32   | The longest character string permitted when reading or writing values and parameters
+| LCONF_MAX_READ | "%32s" | Format string used for reading parameters and values
+| LCONF_MAX_STCH | 15     | Maximum number of stream channels (both input and output  permitted in the DEVCONF struct
+| LCONF_MAX_AOCH | 1      | Highest analog output channel number allowed
+| LCONF_MAX_NAOCH | 2     | Maximum number of analog output channels allowed
+| LCONF_MAX_AICH | 13     | Highest analog input channel number allowed
+| LCONF_MAX_NAICH | 14    | Maximum number of analog input channels allowed
+| LCONF_MAX_AIRES | 8     | Maximum resolution index allowed
+| LCONF_MAX_AOBUFFER | 512 | Maximum analog output buffer for repeating functions
+| LCONF_BACKLOG_THRESHOLD | 1024 | Raise a warning if LJM reports a stream backlog greater than this value
+| LCONF_DEF_NSAMPLE | 64 | Default value for the `nsample` parameter; used when it is unspecified
+| LCONF_DEF_AI_NCH | 199 | Default value for the `ainegative` parameter
+| LCONF_DEF_AI_RANGE | 10. | Default value for the `airange` parameter
+| LCONF_DEF_AI_RES | 0. | Default value for the `airesolution` parameter
+| LCONF_DEF_AO_AMP | 1. | Default value for the `aoamplitude` parameter
+| LCONF_DEF_AO_OFF | 2.5 | Default value for the `aooffset` parameter
+| LCONF_DEF_AO_DUTY | 0.5 | Default value for the `aoduty` parameter
+| LCONF_NOERR | 0 | Value returned on successful exit
+| LCONF_ERROR | 1 | Value returned on unsuccessful exit
+
+## Future Improvements
+Digital data streaming and advanced digital features (like counter and encoder inputs and pwm or frequency outputs) are not currently supported in LCONFIG.  Also, all of the inputs are performed through streaming.
 
 ## Known Bugs
 No persisting known bugs.

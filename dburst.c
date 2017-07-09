@@ -51,7 +51,7 @@ const char help_text[] = \
 "  These flags signal the creation of a meta parameter at the command\n"\
 "  line.  f,i, and s signal the creation of a float, integer, or string\n"\
 "  meta parameter that will be written to the data file header.\n"\
-"     $ drun -f height=5.25 -i temperature=22 -s day=Monday\n"\
+"     $ DBURST -f height=5.25 -i temperature=22 -s day=Monday\n"\
 "\n"\
 "-n SAMPLES\n"\
 "  Specifies the integer number of samples per channel desired.  This\n"\
@@ -138,30 +138,30 @@ int main(int argc, char *argv[]){
     for(metacount--; metacount>=0; metacount--){
         if(metastage[metacount][0]=='f'){
             if(sscanf(&metastage[metacount][1],"%[^=]=%lf",(char*)&param, &ftemp) != 2){
-                fprintf(stderr, "DRUN expected param=float format, but found %s\n", &metastage[metacount][1]);
+                fprintf(stderr, "DBURST expected param=float format, but found %s\n", &metastage[metacount][1]);
                 return -1;
             }
             printf("flt:%s = %lf\n",param,ftemp);
             if (put_meta_flt(dconf, 0, param, ftemp))
-                fprintf(stderr, "DRUN failed to set parameter %s to %lf\n", param, ftemp);
+                fprintf(stderr, "DBURST failed to set parameter %s to %lf\n", param, ftemp);
         }else if(metastage[metacount][0]=='i'){
             if(sscanf(&metastage[metacount][1],"%[^=]=%d",(char*)&param, &itemp) != 2){
-                fprintf(stderr, "DRUN expected param=integer format, but found %s\n", &metastage[metacount][1]);
+                fprintf(stderr, "DBURST expected param=integer format, but found %s\n", &metastage[metacount][1]);
                 return -1;
             }
             printf("int:%s = %d\n",param,itemp);
             if (put_meta_int(dconf, 0, param, itemp))
-                fprintf(stderr, "DRUN failed to set parameter %s to %d\n", param, itemp);
+                fprintf(stderr, "DBURST failed to set parameter %s to %d\n", param, itemp);
         }else if(metastage[metacount][0]=='s'){
             if(sscanf(&metastage[metacount][1],"%[^=]=%s",(char*)&param, (char*)&stemp) != 2){
-                fprintf(stderr, "DRUN expected param=string format, but found %s\n", &metastage[metacount][1]);
+                fprintf(stderr, "DBURST expected param=string format, but found %s\n", &metastage[metacount][1]);
                 return -1;
             }
             printf("str:%s = %s\n",param,stemp);
             if (put_meta_str(dconf, 0, param, stemp))
-                fprintf(stderr, "DRUN failed to set parameter %s to %s\n", param, stemp);
+                fprintf(stderr, "DBURST failed to set parameter %s to %s\n", param, stemp);
         }else{
-            fprintf(stderr, "DRUN unexpected error parsing staged command-line meta parameters!\n");
+            fprintf(stderr, "DBURST unexpected error parsing staged command-line meta parameters!\n");
             return -1;
         }
     }

@@ -35,7 +35,7 @@ $chmod a+x your_exec.bin
 #include <LabJackM.h>
 
 
-#define LCONF_VERSION 2.02   // Track modifications in the header
+#define LCONF_VERSION 2.03   // Track modifications in the header
 /*
 These change logs follow the convention below:
 **LCONF_VERSION
@@ -81,6 +81,13 @@ readability.
 4/10/2017
 Added ndev_config() to detect the number of devices loaded from a configuration
 file.
+
+**2.03
+7/2017
+- Transitioned to name-based addressing instead of explicit addressing for
+adaptation to future modbus upgrades.
+- Added FIO extended feature support.
+
 */
 
 #define TWOPI 6.283185307179586
@@ -95,8 +102,11 @@ file.
 #define LCONF_MAX_NAICH 14  // maximum analog input channels to allow
 #define LCONF_MAX_AIRES 8   // maximum resolution index
 #define LCONF_MAX_NDEV 32   // catch runaway cases if the user passes junk to devmax
+#define LCONF_MAX_FIOCH 7   // Highest flexible IO channel
+#define LCONF_MAX_NFIOCH 8  // maximum flexible IO channels to allow
 #define LCONF_MAX_AOBUFFER  512     // Maximum number of buffered analog outputs
 #define LCONF_BACKLOG_THRESHOLD 1024 // raise a warning if the backlog exceeds this number.
+#define LCONF_CLOCK_MHZ 80.0    // Clock frequency in MHz
 
 // macros for writing lines to configuration files in WRITE_CONFIG()
 #define write_str(param,child) if(dconf[devnum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].child);}
@@ -108,6 +118,9 @@ file.
 #define write_aostr(param,child) if(dconf[devnum].aoch[aonum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].aoch[aonum].child);}
 #define write_aoint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].aoch[aonum].child);
 #define write_aoflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].aoch[aonum].child);
+#define write_fiostr(param,child) if(dconf[devnum].fioch[fionum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].fioch[fionum].child);}
+#define write_fioint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].fioch[fionum].child);
+#define write_fioflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].fioch[fionum].child);
 // macro for testing strings
 #define streq(a,b) strncmp(a,b,LCONF_MAX_STR)==0
 
@@ -126,6 +139,7 @@ file.
 #define LCONF_DEF_AO_AMP 1.
 #define LCONF_DEF_AO_OFF 2.5
 #define LCONF_DEF_AO_DUTY 0.5
+#define LCONF_DEF_FIO_TIMEOUT 1000
 
 #define LCONF_NOERR 0
 #define LCONF_ERROR 1
@@ -157,7 +171,7 @@ typedef struct aiconf {
 //  The calibration and zero parameters are used by the aical function
 
 // Define the types of analog outputs supported
-enum AOSIGNAL {CONSTANT, SINE, SQUARE, TRIANGLE, NOISE};
+enum AOSIGNAL {AO_CONSTANT, AO_SINE, AO_SQUARE, AO_TRIANGLE, AO_NOISE};
 
 // Analog output configuration
 // This includes everything we need to know to construct a signal for output
@@ -171,6 +185,35 @@ typedef struct aoconf {
                                   // duty=1 results in all-high square and an all-rising triangle (sawtooth)
 } AOCONF;
 
+
+typedef struct fioconf {
+    // Flexible IO mode enumerated type
+    enum {  FIO_NONE,   // No extended features
+            FIO_PWM,    // Pulse width modulation (input/output)
+            FIO_COUNT,  // Counter (input/output)
+            FIO_FREQUENCY,  // Frequency (input)
+            FIO_PHASE,  // Line-to-line phase (input)
+            FIO_QUADRATURE  // Encoder quadrature (input)
+        } signal;
+
+    enum {  FIO_RISING,     // Rising edge
+            FIO_FALLING,    // Falling edge
+            FIO_ALL         // Rising and falling edges
+        } edge;
+
+    enum {  FIO_DEBOUNCE_NONE,      // No debounce
+            FIO_DEBOUNCE_FIXED,     // Fixed debounce timer (rising, falling)
+            FIO_DEBOUNCE_RESTART,   // Self restarting timer (rising, falling, all)
+            FIO_DEBOUNCE_MINIMUM    // Minimum pulse width (rising, falling)
+        } debounce;
+
+    enum {  FIO_INPUT, FIO_OUTPUT } direction;
+    int channel;
+    double time;        // Time parameter (us)
+    double duty;        // PWM duty cycle (0-1)
+    double phase;       // Phase parameters (degrees)
+    unsigned int count; // Pulse count
+} FIOCONF;
 
 // The METACONF is a struct for user-defined flexible parameters.
 // These are not used to configure the DAQ, but simply data of record
@@ -205,6 +248,9 @@ typedef struct devconf {
     unsigned int naich;             // number of configured analog input channels
     AOCONF aoch[LCONF_MAX_NAOCH];   // analog output configuration array
     unsigned int naoch;             // number of configured analog output channels
+    double fiofrequency;            // flexible input/output frequency
+    FIOCONF fioch[LCONF_MAX_NFIOCH]; // flexible digital input/output
+    unsigned int nfioch;            // how many of the FIO are configured?
     int handle;                     // device handle
     double samplehz;                // *sample rate in Hz
     double settleus;                // *settling time in us
@@ -374,6 +420,84 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   period.  For a triangle wave, the duty cycle indicates the percentage of
 .   the period that will be spent rising, so a sawtooth wave can be created
 .   with AODUTY values of 0.0 and 1.0.
+-FIOFREQUENCY
+.   Sets the frequency scale for all FIO extended features.  This parameter
+.   determines how often the FIO clock updates.  Pulse and PWM outputs will
+.   exhibit this frequency.
+-FIOCHANNEL
+.   Like the AOCHANNEL and AICHANNEL, this determines which of the FIO channels
+.   is being set.
+-FIOSIGNAL
+.   Sets the signal type used for this channel.  Valid values are:
+.       pwm - Pulse-width or duty cycle signal
+.       count - Edge counter
+.       frequency - Period or frequency tracker
+.       phase - Edge delay (input only)
+.       quadrature - Two-channel encoder quadrature
+-FIOEDGE
+.   Used by the frequency and phase signals, this parameter determines whether
+.   rising, falling, or both edges should be counted.  Valid values are "all",
+.   "rising", or "falling".
+-FIODEBOUNCE
+.   Used by a count input signal, this parameter indicates what type of filter
+.   (if any) to emply to clean noisy (bouncy) edges.  Valid values are:
+.       none - all qualifying edges are counted
+.       fixed - ignore all edges a certain interval after an edge
+.       reset - like fixed, but the interval resets if an edge occurrs during
+.               the timeout period.
+.       minimum - count only edges that persist for a minimum interval
+.   The intervals specified in these debounce modes are set by the FIOUSEC
+.   parameter.
+-FIODIRECTION
+.   Valid parameters "input" or "output" determine whether the signal should
+.   be generated or measured.  FIO outputs cannot be streamed, but are set
+.   statically.
+-FIOUSEC
+.   Specifies a time in microseconds.  This is used to debounce a count input.
+-FIODEGREES
+.   Specifies a phase angle in degrees.  This is used to produce a PWM signal
+.   with phase relative to other channels.
+-FIODUTY
+.   Accepts a floating value from zero to one indicating a PWM duty cycle.
+-META
+.   The META keyword begins or ends a stanza in which meta parameters can be 
+.   defined without a type prefix (see below).  Meta parameters are free entry
+.   parameters that are not directly understood by LCONFIG functions, but that
+.   the application program might use, or that the user may want recorded in
+.   a data file.  Once a meta stanza is begun, any parameter name that is not 
+.   recognized as a built-in parameter is used to create a new meta parameter.
+.   The type of the stanza determines which data type the new parameter will
+.   hold.  The meta parameter accepts one of nine string values; str, string, 
+.   int, integer, flt, float, end, none, and stop.
+.
+.   meta int  OR  meta integer
+.       starts a stanza in which any unrecognized parameter names are used to
+.       create integer meta parameters.
+.   meta flt  OR  meta float
+.       starts a stanza in which any unrecognized parameter names are used to
+.       create floating point meta parameters.
+.   meta str  OR  meta string
+.       starts a stanza in which any unrecognized parameter names are used to
+.       create string meta parameters.
+.   meta end  OR  meta stop  OR  meta none
+.       ends the meta stanza so that unrecognized parameter names will cause an
+.       error.  
+.
+.   Adding a "meta end" pair to the end of a meta stanza is not strictly 
+.   necessary, but it is STRONGLY recommended.  Defining non-meta parameters in 
+.   a meta stanza is allowed, but STRONGLY discouraged.  Configuration file 
+.   authors should ALWAYS avoid a situation where a typo in an important 
+.   parameter creates a new parameter instead of throwing an error.
+.
+.   For example...
+.       meta integer
+.           cats 9
+.           dogs 8
+.           teeth 606
+.       meta float
+.           weightkg 185.6
+.       meta end
+.
 -INT:META
 -FLT:META
 -STR:META
@@ -570,8 +694,8 @@ These are functions not designed for use outside the header
 // force a string to lower case
 void strlower(char* target);
 
-// calculate analog input configuration register addresses
-void airegisters(const unsigned int channel, int *reg_negative, int *reg_range, int *reg_resolution);
+/* *DEPRECIATED* calculate transitioned away from address referencing
+//void airegisters(const unsigned int channel, int *reg_negative, int *reg_range, int *reg_resolution);
 
 // calculate analog output configuration register addresses
 void aoregisters(const unsigned int buffer,     // The output stream number (not the DAC number)
@@ -581,6 +705,7 @@ void aoregisters(const unsigned int buffer,     // The output stream number (not
                 int *reg_buffer,                // STREAM_OUT#_BUFFER_F32 (This is the destination for floating point data)
                 int *reg_loopsize,              // STREAM_OUT#_LOOP_SIZE (The number of samples in the loop)
                 int *reg_setloop);              // STREAM_OUT#_SET_LOOP (how to interact with the loop; should be 1)
+*/
 
 // print a formatted line with color flags for mismatching values
 // prints the following format: printf("%s: %s (%s)\n", head, value1, value2)

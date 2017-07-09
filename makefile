@@ -22,3 +22,6 @@ dburst: lconfig.o dburst.c
 	gcc lconfig.o dburst.c $(LINK) -o dburst
 	chmod +x dburst
 
+test: lconfig.o test.c
+	gcc lconfig.o test.c $(LINK) -o test
+	chmod +x test

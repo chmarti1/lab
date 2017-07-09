@@ -24,16 +24,19 @@ experiment.  I love my LabJack, and the folks at LabJack do a great job of docum
 This little **L**aboratory **CONFIG**uration system reads and writes configuration and data files, connects to and configures the T7, and automates the jobs I've done most.  As of version 2.02, that includes analog input streaming and analog output simulating a function generator.
 
 ## <a name="start"></a> Getting started
-If you just want to be able to take some quick data, then `drun` and `dburst` will probably work.  
+To get the repository,
+
 ```
+    $ git clone http://github.com/chmarti1/lab
+    $ cd lab
     $ make drun
     $ make dburst
     $ ./drun -h   # prints help
     $ ./dburst -h # prints help
 ```
-They load a configuration file, open the appropriate device connections, initiate the data transfer, and write data files automatically.
+`drun` and `dburst` are probably the best places to get started.  They load a configuration file, open the appropriate device connections, initiate the data transfer, and write data files automatically.
 
-For writing your own executables, an overview of the LCONFIG system is laid out in LCONFIG_README.  It isn't an exhaustive document, but it's a great way to get started.  The absolute authoritative documentation for LCONFIG is the comments in the prototype section of the header itself.  It is always updated with each version change.
+For writing your own executables, a quick tutorial on programming with the LCONFIG system is laid out in LCONFIG_README with the gritty details in this README.  The absolute authoritative documentation for LCONFIG is the comments in the prototype section of the header itself.  It is always updated with each version change.
 
 Once you produce your data, there's a good chance that you'll want to analyze it.  If you're a Python user, the lconfig.py module will get you up and running quickly.  Its documentation is inline.
 
@@ -165,11 +168,11 @@ A structure that holds data relevant to the configuration of a single analog out
 | Member | Type | Valid for | Default | Description
 |---|:---:|:---:|:---:|:---
 |channel | `unsigned int` | all | - | Specifies the physical DAC channel
-|signal | `enum AOSIGNAL` | all | - | Specifies the type of signal: `CONSTANT` (a DC signal with no AC), `SINE`, `SQUARE`, `TRIANGLE`, `NOISE` (a series of pseudo-random samples)
-|amplitude | `double` | `SINE`, `SQUARE`, `TRIANGLE`, `NOISE` | `LCONF_DEF_AO_AMP` | Specifies the amplitude (max-mean) of the AC signal component in volts
+|signal | `enum AOSIGNAL` | all | - | Specifies the type of signal: `AO_CONSTANT` (a DC signal with no AC), `AO_SINE`, `AO_SQUARE`, `AO_TRIANGLE`, `AO_NOISE` (a series of pseudo-random samples)
+|amplitude | `double` | sine, square, triangle, noise | `LCONF_DEF_AO_AMP` | Specifies the amplitude (max-mean) of the AC signal component in volts
 |offset | `double` | all | `LCONF_DEF_AO_OFF` | Specifies a DC offset to superimpose with the signal in volts
-|frequency | `double` | all | - | Specifies the rate at which the signal should repeat in Hz. Should be large for `OFFSET`.  Determines the lowest frequency content in a `NOISE` signal.
-|duty | `double` | `SQUARE`, `TRIANGLE` | 0.5 | For a square wave, `duty` indicates the fractional time spent at the high value.  For a triangle wave, `duty` indicates the fractional time spent rising.
+|frequency | `double` | all | - | Specifies the rate at which the signal should repeat in Hz.  Determines the lowest frequency content in a `NOISE` signal.  `CONSTANT` signals should always be specified with a large frequency.
+|duty | `double` | square, triangle | 0.5 | For a square wave, `duty` indicates the fractional time spent at the high value.  For a triangle wave, `duty` indicates the fractional time spent rising.
 
 ### METACONF Struct
 A structure that defines a single meta parameter
@@ -217,29 +220,29 @@ This structure contains all of the information needed to configure a device.  Th
 
 | Function | Description
 |:---:|:---
-| **Interacting with Configuration Files** ||
+| [**Interacting with Configuration Files**](#fun:config) ||
 |load_config| Parses a configuration file and encodes the configuration on an array of DEVCONF structures
 |write_config| Writes a configuration file based on the configuration of a DEVCONF struct
-| **Device Interaction** ||
+| [**Device Interaction**](#fun:dev) ||
 |open_config| Opens a connection to the device identified in a DEVCONF configuration struct.  The handle is remembered by the DEVCONF struct.
 |close_config| Closes an open connection to the device handle in a DEVCONF configuration struct
 |upload_config| Perform the appropriate read/write operations to implement the DEVCONF struct settings on the T7
 |download_config| Populate a fresh DEVCONF structure to reflect a device's current settings.  Not all settings can be verified, so only some of the settings are faithfully represented.
-| **Configuration Diagnostics** ||
+| [**Configuration Diagnostics**](#fun:diag) ||
 |show_config| Calls download_config and automatically generates an item-by-item comparison of the T7's current settings and the settings contained in a DEVCONF structure.
 |ndev_config | Returns the number of configured devices in a DEVCONF array
 |nistream_config| Returns the number of configured input channels in a DEVCONF device structure
-| **Data Collection** ||
+| [**Data Collection**](#fun:data) ||
 |start_data_stream | Start a data collection process
 |read_data_stream | Read in data from an active data stream
 |stop_data_stream | Stop an active data stream
 |start_file_stream | Start a data stream directly to a file. File streams are slower than data streams.
 |read_file_stream | Read data from an active file stream directly to a file
 |stop_file_stream | Stop an active file stream
-| **Meta Configuration** ||
+| [**Meta Configuration**](#fun:meta) ||
 | get_meta_int, get_meta_flt, get_meta_str | Returns a meta parameter integer, floating point, or string value.  
 | put_meta_int, put_meta_flt, put_meta_str | Write an integer, floating point, or a string value to a meta parameter.
-| **Helper Functions (Not needed by most users)** ||
+| **Helper Functions** | **(Not needed by most users)** |
 |clean_file_stream | Clean up after a file stream process; close the file and deallocate the buffer.  This is done automatically by `stop_file_stream`.
 |str_lower | Modify a string to be all lower case
 |airegisters | Returns the modbus registers relevant to configuring an analog input channel
@@ -248,7 +251,9 @@ This structure contains all of the information needed to configure a device.  Th
 |read_param | Used by the `load_config` function to strip the whitespace around parameter/value pairs
 |init_config | Writes sensible defaults to a configuration struct
 
-###Interacting with Configuration Files
+<a name='fun:config'></a>
+### Interacting with Configuration Files
+
 ```C
 int load_config(          DEVCONF* dconf, 
                 const unsigned int devmax, 
@@ -261,18 +266,17 @@ void write_config(        DEVCONF* dconf,
                 const unsigned int devnum, 
                              FILE* ff)
 ```
-`write_config` writes a configuration stanza to an open file, `ff`, for the parameters of devices number `devnum` in the array, `dconf`.  A DEVCONF structure written by `write_config` should result in an identical structure after being read by `load_config`.
+`write_config` writes a configuration stanza to an open file, `ff`, for the parameters of device number `devnum` in the array, `dconf`.  A DEVCONF structure written by `write_config` should result in an identical structure after being read by `load_config`.
 
 Rather than accept file names, `write_config` accepts an open file pointer so it is convenient for creating headers for data files (which don't need to be closed after the configuration is written).  It also means that the write operation doesn't need to return an error status.
 
+<a name='fun:dev'></a>
 ### Device Interaction
 ```C
 int open_config(          DEVCONF* dconf, 
                 const unsigned int devnum)
 ```
 `open_config` opens a connection to the device described in the `devnum` element of the `dconf` array.  The function returns either `LCONF_ERROR` or `LCONF_NOERR` depending on whether an error was raised during execution.
-
-
 
 ```C
 int close_config(         DEVCONF* dconf, 
@@ -295,6 +299,7 @@ int download_config(      DEVCONF* dconf,
 
 It is important to note that some of the DEVCONF members configure parameters that are not used until a data operation is executed (like `nsample` or `samplehz`).  These parameters can never be downloaded because they do not reside persistently on the T7.
 
+<a name='fun:diag'></a>
 ### Configuration Diagnostics
 ```C
 int ndev_config(          DEVCONF* dconf, 
@@ -314,6 +319,7 @@ void show_config(         DEVCONF* dconf,
 ```
 The `show_config` function calls `download_config` and prints a detailed color-coded comparison of live parameters against the configuration parameters in the `devnum` element of the `dconf` array.  Parameters that do not match are printed in red while parameters that agree with the configuration parameters are printed in green.
 
+<a name='fun:data'></a>
 ### Data Collection
 ```C
 int start_data_stream(    DEVCONF* dconf, 
@@ -347,6 +353,7 @@ int stop_file_stream(     DEVCONF* dconf,
 ```
 Similar to the data stream functions, these file stream functions write samples directly to a formatted text file, and do not require a data buffer.
 
+<a name='fun:meta'></a>
 ### Meta Configuration
 ```C
 int get_meta_int(          DEVCONF* dconf, 

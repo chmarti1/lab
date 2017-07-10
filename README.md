@@ -5,7 +5,7 @@ Headers and utilities for laboratory measurements and machine control with the
 
 By Chris Martin [crm28@psu.edu](mailto:crm28@psu.edu)
 
-Version 2.02
+Version 2.03
 
 - [About](#about)
 - [Getting started](#start)
@@ -144,6 +144,15 @@ These are the parameters recognized by LCONFIG.  The valid values list the value
 | aooffset    | floating point                          | Analog Output | Offset (DC) voltage to add to the oscillating (AC) signal.
 | aoduty      | floating point [0-1]                    | Analog Output | The duty cycle of triangle and square waves. This skews the signal to spend more time on one part of the wave than the other.
 | aofrequency | floating point                          | Analog Output | Specifies the rate the wave will repeat in Hz.
+| fiofrequency | floating point                         | Global        | Specifies the CLOCK0 rollover frequency.
+| fiochannel  | integer [0-7]                           | Flexible IO   | The physical FIO channel to use for a digital IO operation.
+| fiosignal   | pwm, count, frequency, phase, quadrature | Flexible IO  | The FIO signal/feature to use on this FIO channel.
+| fiodirection | input, output                          | Flexible IO   | Is this channel an input or an output? (input is default)
+| fioedge     | rising, falling, all                    | Flexible IO   | Specifies the behavior of FIO features that depend on edge direction (count, phase, PWM).
+| fiodebounce | none, fixed, reset, minimum             | Flexible IO   | The debounce filter to be used for a counter input.
+| fiousec     | floating point [>0]                     | Flexible IO   | A generic time parameter for configuring FIO channels.
+| fiodegrees  | floating point                          | Flexible IO   | A generic phase parameter for configuring FIO channels.
+| fioduty     | floating point [0-1]                    | Flexible IO   | Duty cycle for a PWM output.
 | meta        | flt/float, int/integer, str/string, stop/end/none | Meta | Starts a meta parameter stanza.  Any unrecognized parameter name after this directive will be treated as a new meta parameter of the specified type.  If stop, end, or none is specified, the meta stanza is ended, and unrecognized parameters will cause errors again.
 | flt:param   | floating point                          | Meta | Specifies a single floating point meta parameter.
 | int:param   | integer                                 | Meta | Specifies a single integer parameter
@@ -173,6 +182,21 @@ A structure that holds data relevant to the configuration of a single analog out
 |offset | `double` | all | `LCONF_DEF_AO_OFF` | Specifies a DC offset to superimpose with the signal in volts
 |frequency | `double` | all | - | Specifies the rate at which the signal should repeat in Hz.  Determines the lowest frequency content in a `NOISE` signal.  `CONSTANT` signals should always be specified with a large frequency.
 |duty | `double` | square, triangle | 0.5 | For a square wave, `duty` indicates the fractional time spent at the high value.  For a triangle wave, `duty` indicates the fractional time spent rising.
+
+### FIOCONF Struct
+A structure that holds data relevant to the configuration of a single flexible I/O channel
+
+| Member | Type | Valid for | Default | Description
+|---|:---:|:---:|:---:|:---
+|channel | `int` | all | - | Specifies the physical FIO channel [0-7]
+|direction | `enum` | all | `FIO_INPUT` | Specifies input/output direction: `FIO_INPUT`, `FIO_OUTPUT`
+|signal | `enum` | all | - | Specifies the behavior for the channel: `FIO_NONE`, `FIO_PWM`, `FIO_COUNT`, `FIO_FREQUENCY`, `FIO_PHASE`, `FIO_QUADRATURE`
+|edge | `enum` | pwm, phase, count | `FIO_RISING` | Specifies which edge should be interpreted by the channel: `FIO_RISING`, `FIO_FALLING`, `FIO_ALL`
+|debounce | `enum` | count | `FIO_DEBOUNCE_NONE` | Specifies which debounce filter should be used by the interrupt counter: `FIO_DEBOUNCE_NONE`, `FIO_DEBOUNCE_FIXED`, `FIO_DEBOUNCE_RESTART`, `FIO_DEBOUNCE_MINIMUM`
+|time  | `double` | count, pwm, frequency, phase | 0. | In microseconds, specifies the debounce duration for counters, indicates the measured period in PWM and frequency modes, and indicates the measured delay in phase mode.
+|phase | `double` | pwm | 0. | In degrees, indicates the phase of a PWM output.  This can be useful for motor driver applications.
+|duty | `double` | pwm | 0.5 | Indicates the duty cycle (measured or commanded) of a PWM signal.
+|counts | `unsigned int` | count, pwm, phase, frequency | 0 | Indicates the status of a counter input, the measured period of a PWM or frequency input (in ticks), or the measured delay of a phase input (in ticks).
 
 ### METACONF Struct
 A structure that defines a single meta parameter
@@ -209,6 +233,8 @@ This structure contains all of the information needed to configure a device.  Th
 |naich | `unsigned int` | - | The number of aich entries that have been configured
 |aoch | `AOCONF[LCONF_MAX_NAOCH]` | - | An array of `AOCONF` structs for configuring output channels
 |naoch | `unsigned int` | - | The number of aoch entries that have been configured
+|fioch | `FIOCONF[LCONF_MAX_NFIOCH]` | - | An array of `FIOCONF` structs for configuring flexible digital I/O channels
+|nfioch| `unsigned int` | - | The number of fioch entries that have been configured
 |handle | `int` | - | The device handle returned by the `LJM_Open` function
 |samplehz | `double`| positive frequency | The sample rate in Hz. This value will be overwritten with the ACTUAL device sample rate once an acquisition process has begun.
 |settleus | `double`| positive time | The multiplexer settling time for each sample in microseconds
@@ -239,6 +265,7 @@ This structure contains all of the information needed to configure a device.  Th
 |start_file_stream | Start a data stream directly to a file. File streams are slower than data streams.
 |read_file_stream | Read data from an active file stream directly to a file
 |stop_file_stream | Stop an active file stream
+|update_fio | Update all flexible I/O measurements and output parameters in the FIOCONF structs
 | [**Meta Configuration**](#fun:meta) ||
 | get_meta_int, get_meta_flt, get_meta_str | Returns a meta parameter integer, floating point, or string value.  
 | put_meta_int, put_meta_flt, put_meta_str | Write an integer, floating point, or a string value to a meta parameter.
@@ -353,6 +380,23 @@ int stop_file_stream(     DEVCONF* dconf,
 ```
 Similar to the data stream functions, these file stream functions write samples directly to a formatted text file, and do not require a data buffer.
 
+```C
+int update_fio(DEVCONF* dconf, const unsigned int devnum)
+```
+Users can write to the FIO parameters in the `DEVCONF` structure directly.  For example, the following code might be used to adjust flexible I/O channel 0's duty cycle to 25%.
+```
+dconf[devnum].fioch[0].duty = .25;
+update_fio(dconf,devnum);
+```
+The `update_fio()` function also downloads the latest measurements into the relevant member variables.  The following code might be used to measure a pulse frequency from a flow sensor.
+```C
+double frequency;
+int update_fio(dconf, devnum);
+frequency = 1e6 / dconf[devnum].fioch[0].time;
+```
+
+The T7 supports streaming digital I/O, but `LCONFIG` does not support it as of version 2.03.
+
 <a name='fun:meta'></a>
 ### Meta Configuration
 ```C
@@ -420,7 +464,7 @@ These are the compiler constants provided by `lconfig.h`.
 | LCONF_ERROR | 1 | Value returned on unsuccessful exit
 
 ## Future Improvements
-Digital data streaming and advanced digital features (like counter and encoder inputs and pwm or frequency outputs) are not currently supported in LCONFIG.  Also, all of the inputs are performed through streaming.
+Analog input software triggering is on its way.  This is a technique for streaming continuously until a trigger event is observed in software.  Well implemented software triggers allow for generous pre-trigger buffering, so data before and after the trigger can be recorded.
 
 ## Known Bugs
 No persisting known bugs.

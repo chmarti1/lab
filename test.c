@@ -1,16 +1,22 @@
 #include "lconfig.h"
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 int main(){
     DEVCONF dconf[3];
-    FILE* ff;
+    int ii;
 
     load_config(dconf,3,"test.conf");
+    open_config(dconf,0);
+    upload_config(dconf,0);
+    for(ii=0; ii<100; ii++){
+        sleep(1);
+        update_fio(dconf,0);
+        show_config(dconf,0);
+    }
 
-    ff = fopen("testout.conf","w");
-    write_config(dconf,0,ff);
-    fclose(ff);
+    close_config(dconf,0);
     return 0;
 }
 

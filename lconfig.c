@@ -113,28 +113,40 @@ void read_param(FILE *source, char *param){
 
 void init_config(DEVCONF* dconf){
     int ainum, aonum, metanum, fionum;
+    // Global configuration
     dconf->connection = -1;
     dconf->serial[0] = '\0';
     dconf->ip[0] = '\0';
     dconf->gateway[0] = '\0';
     dconf->subnet[0] = '\0';
-    dconf->naich = 0;
-    dconf->naoch = 0;
-    dconf->nfioch = 0;
+    // Global sample settings
     dconf->samplehz = -1.;
     dconf->settleus = 1.;
     dconf->nsample = LCONF_DEF_NSAMPLE;
+    // Trigger settings
+    dconf->trigchannel = -1;
+    dconf->triglevel = 0.;
+    dconf->trigpre = 0;
+    dconf->trigpre_collected = 0;
+    dconf->trigstate = TRIG_IDLE;
+    dconf->trigedge = TRIG_RISING;
+    // Filestream
     dconf->FS.buffer = NULL;
     dconf->FS.file = NULL;
     dconf->FS.samples_per_read = 0;
+    // Metas
     for(metanum=0; metanum<LCONF_MAX_META; metanum++)
         dconf->meta[metanum].param[0] = '\0';
+    // Analog Inputs
+    dconf->naich = 0;
     for(ainum=0; ainum<LCONF_MAX_NAICH; ainum++){
         dconf->aich[ainum].channel = -1;
         dconf->aich[ainum].nchannel = LCONF_DEF_AI_NCH;
         dconf->aich[ainum].range = LCONF_DEF_AI_RANGE;
         dconf->aich[ainum].resolution = LCONF_DEF_AI_RES;
     }
+    // Analog Outputs
+    dconf->naoch = 0;
     for(aonum=0; aonum<LCONF_MAX_NAOCH; aonum++){
         dconf->aoch[aonum].channel = -1;
         dconf->aoch[aonum].frequency = -1;
@@ -143,16 +155,19 @@ void init_config(DEVCONF* dconf){
         dconf->aoch[aonum].offset = LCONF_DEF_AO_OFF;
         dconf->aoch[aonum].duty = LCONF_DEF_AO_DUTY;
     }
+    // Flexible IO
+    dconf->nfioch = 0;
     dconf->fiofrequency = 0.;
     for(fionum=0; fionum<LCONF_MAX_NFIOCH; fionum++){
         dconf->fioch[fionum].channel = -1;
         dconf->fioch[fionum].signal = FIO_NONE;
         dconf->fioch[fionum].edge = FIO_RISING;
         dconf->fioch[fionum].debounce = FIO_DEBOUNCE_NONE;
+        dconf->fioch[fionum].direction = FIO_INPUT;
         dconf->fioch[fionum].time = 0.;
         dconf->fioch[fionum].duty = .5;
         dconf->fioch[fionum].phase = 0.;
-        dconf->fioch[fionum].count = 0;
+        dconf->fioch[fionum].counts = 0;
     }
 }
 
@@ -536,13 +551,50 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             // Convert the string into a float
             }else if(sscanf(value,"%f",&ftemp)!=1){
-                fprintf(stderr,"LOAD: AOduty expected float, but found: %s\n", value);
+                fprintf(stderr,"LOAD: AOduty expected float but found: %s\n", value);
                 goto lconf_loadfail;
             }else if(ftemp<0. || ftemp>1.){
                 fprintf(stderr,"LOAD: AOduty must be between 0. and 1.  Found %f.\n", ftemp);
                 goto lconf_loadfail;
             }
             dconf[devnum].aoch[aonum].duty = ftemp;
+        //
+        // TRIGCHANNEL parameter
+        //
+        }else if(streq(param,"trigchannel")){
+            if(sscanf(value,"%d",&itemp)!=1){
+                fprintf(stderr,"LOAD: TRIGchannel expected an integer channel number but found: %s\n", 
+                    value);
+                goto lconf_loadfail;
+            }else if(itemp<0){
+                fprintf(stderr,"LOAD: TRIGchannel must be non-negative.\n");
+                goto lconf_loadfail;
+            }
+            dconf[devnum].trigchannel = itemp;
+        //
+        // TRIGLEVEL parameter
+        //
+        }else if(streq(param,"triglevel")){
+            if(sscanf(value,"%f",&ftemp)!=1){
+                fprintf(stderr,"LOAD: TRIGlevel expected a floating point voltage but found: %s\n", 
+                    value);
+                goto lconf_loadfail;
+            }
+            dconf[devnum].triglevel = ftemp;
+        //
+        // TRIGEDGE parameter
+        //
+        }else if(streq(param,"trigedge")){
+            if(streq(value,"rising"))
+                dconf[devnum].trigedge = TRIG_RISING;
+            else if(streq(value,"falling"))
+                dconf[devnum].trigedge = TRIG_FALLING;
+            else if(streq(value,"all"))
+                dconf[devnum].trigedge = TRIG_ALL;
+            else{
+                fprintf(stderr,"LOAD: Unrecognized TRIGedge parameter: %s\n", value);
+                goto lconf_loadfail;
+            }
         //
         // FIOFREQUENCY parameter
         //
@@ -965,6 +1017,7 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
     int aonum,naoch;
     // Registers for fio configuration
     int fionum,nfioch;
+    unsigned int fio_clk_roll, fio_clk_div;
     unsigned int samples;
     double ei,er,gi,gr;     // exponent and generator (real and imaginary)
     int dummy;  // a dummy variable
@@ -1270,7 +1323,7 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
     //
     // Upload the FIO parameters
     // First, deactivate all of the extended features
-    // For some reason, DIO20 - DIO22_EF_ENABLE raises an error
+    // For some reason, upper DIO#_EF_ENABLE raises an error
     for(fionum=0; fionum<8; fionum++){
         sprintf(stemp, "DIO%d_EF_ENABLE", fionum);
         err = err ? err : LJM_eWriteName(handle, stemp, 0);
@@ -1284,11 +1337,11 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
         ftemp = 1e6 * LCONF_CLOCK_MHZ / dconf[devnum].fiofrequency;
     else
         ftemp = 0xFFFFFFFF; // If FIOFREQUENCY is not configured, use a default
-    itemp = 1;
+    fio_clk_div = 1;
     // The roll value is a 32-bit integer, and the maximum divisor is 256
-    while(ftemp > 0xFFFFFFFF && itemp < 256){
+    while(ftemp > 0xFFFFFFFF && fio_clk_div < 256){
         ftemp /= 2;
-        itemp *= 2;
+        fio_clk_div *= 2;
     }
     // Do some sanity checking
     if(ftemp > 0xFFFFFFFF){
@@ -1300,14 +1353,16 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
             dconf[devnum].fiofrequency, LCONF_CLOCK_MHZ / 0x8);
         goto lconf_uploadfail;
     }
+    // Convert the rollover value to unsigned int
+    fio_clk_roll = (unsigned int) ftemp;
     // Write the clock configuration
     // disable the clock
     err = LJM_eWriteName( handle, "DIO_EF_CLOCK0_ENABLE", 0);
     // Only configure the clock if FIO channels have been configured.
     if(dconf[devnum].nfioch>0){
-        err = err ? err : LJM_eWriteName( handle, "DIO_EF_CLOCK0_ROLL_VALUE", ftemp);
+        err = err ? err : LJM_eWriteName( handle, "DIO_EF_CLOCK0_ROLL_VALUE", fio_clk_roll);
         // set the clock divisor
-        err = err ? err : LJM_eWriteName(handle, "DIO_EF_CLOCK0_DIVISOR", itemp);
+        err = err ? err : LJM_eWriteName(handle, "DIO_EF_CLOCK0_DIVISOR", fio_clk_div);
         // re-enable the clock
         err = err ? err : LJM_eWriteName(handle, "DIO_EF_CLOCK0_ENABLE", 1);
         if(err){
@@ -1316,9 +1371,7 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
         }
         // If the clock setup was successful, then back-calculate the actual frequency
         // and store it in the fiofrequency parameter.
-        LJM_eReadName( handle, "DIO_EF_CLOCK0_ROLL_VALUE", &ftemp);
-        ftemp *= itemp;
-        dconf[devnum].fiofrequency = 1e6 * LCONF_CLOCK_MHZ / ftemp;
+        dconf[devnum].fiofrequency = 1e6 * LCONF_CLOCK_MHZ / fio_clk_roll / fio_clk_div;
     }
     
     // Configure the FIO channels
@@ -1354,18 +1407,15 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
                             dconf[devnum].fioch[fionum].channel);
                         goto lconf_uploadfail;
                     }
-                    // Get the roll value
-                    LJM_eReadName( handle, "DIO_EF_CLOCK0_ROLL_VALUE", &ftemp);
-                    itemp = (unsigned int) ftemp;
                     // Calculate the start index
                     // Unwrap the phase first (lazy method)
                     while(dconf[devnum].fioch[fionum].phase<0.)
                         dconf[devnum].fioch[fionum].phase += 360.;
-                    itemp1 = itemp * (dconf[devnum].fioch[fionum].phase / 360.);
-                    itemp1 %= itemp;
+                    itemp1 = fio_clk_roll * (dconf[devnum].fioch[fionum].phase / 360.);
+                    itemp1 %= fio_clk_roll;
                     // Calculate the stop index
-                    itemp2 = itemp * dconf[devnum].fioch[fionum].duty;
-                    itemp2 = (((long int) itemp1) + ((long int) itemp2))%itemp;
+                    itemp2 = fio_clk_roll * dconf[devnum].fioch[fionum].duty;
+                    itemp2 = (((long int) itemp1) + ((long int) itemp2))%fio_clk_roll;
                     // Measurement index 1
                     sprintf(stemp, "DIO%d_EF_INDEX", channel);
                     err = err ? err : LJM_eWriteName( handle, stemp, 1);
@@ -1573,13 +1623,13 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
 
 
 int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
-    int err, aonum, ainum, reg_temp, type_temp;
-    double ftemp;
+    int err, aonum, ainum, fionum, reg_temp, type_temp;
+    double ftemp, ftemp1, ftemp2;
     int itemp;
-    int handle, naich, naoch;
+    int handle, naich, naoch, nfioch, fioindex;
     int DeviceType,ConnectionType,SerialNumber,IPAddress,Port,MaxBytesPerMB;
     char stemp[LCONF_MAX_STR];
-    unsigned int channel;
+    unsigned int channel, fio_clk_roll, fio_clk_div;
 
     // First, initialize the output
     init_config(out);
@@ -1592,6 +1642,8 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
     out->naich = naich;
     naoch = dconf[devnum].naoch;
     out->naoch = naoch;
+    nfioch = dconf[devnum].nfioch;
+    out->nfioch = nfioch;
 
     // Test the connection and retrieve addressing parameters
     err = LJM_GetHandleInfo(handle, 
@@ -1692,18 +1744,171 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
     for(aonum=0; aonum<naoch; aonum++){
         // Determine the channel from the STREAM_OUT#_TARGET
         sprintf(stemp, "STREAM_OUT%d_TARGET", aonum);
-        LJM_eReadName(handle, stemp, &ftemp);
+        err = err ? err : LJM_eReadName(handle, stemp, &ftemp);
         LJM_NameToAddress("DAC0",&reg_temp,&type_temp);
         // calculate a channel number based on the target's distance from DAC0
         out->aoch[aonum].channel = ((int)ftemp - reg_temp)/2;
         // calculate a signal frequency based on the loop size
         sprintf(stemp, "STREAM_OUT%d_LOOP_SIZE", aonum);
-        LJM_eReadName(handle, stemp, &ftemp);
+        err = err ? err : LJM_eReadName(handle, stemp, &ftemp);
         // borrow the samplehz parameter to estimate signal frequency
         if(ftemp>0)
             out->aoch[aonum].frequency = dconf[devnum].samplehz / ftemp;
         else
             out->aoch[aonum].frequency = -1;
+    }
+    if(err){
+        fprintf(stderr,"DOWNLOAD: Failed to read the analog output parameters.\n");
+        goto lconf_downloadfail;
+    }
+
+    // Retrieve the FIO clock settings if there are FIO channels
+    if(nfioch>0){
+        err = err ? err : LJM_eReadName(handle, "DIO_EF_CLOCK0_ROLL_VALUE", &ftemp);
+        fio_clk_roll = ftemp;
+        err = err ? err : LJM_eReadName(handle, "DIO_EF_CLOCK0_DIVISOR", &ftemp);
+        fio_clk_div = ftemp;
+        out->fiofrequency = ((double) 1e6 * LCONF_CLOCK_MHZ) / fio_clk_roll / fio_clk_div;
+    }
+    if(err){
+        fprintf(stderr,"DOWNLOAD: Failed to read the FIO clock settings.\n");
+        goto lconf_downloadfail;
+    }
+
+    // Check the FIO extended features
+    for(fionum=0; fionum<nfioch; fionum++){
+        // read the channel from the existing configuration
+        channel = dconf[devnum].fioch[fionum].channel;
+        out->fioch[fionum].channel = channel;
+
+        // Retrieve the extended feature index for the channel
+        sprintf(stemp, "DIO%d_EF_INDEX", channel);
+        err = err ? err : LJM_eReadName(handle, stemp, &ftemp);
+        fioindex = (int) ftemp;
+        // Check the index
+        if(fioindex == 1){
+            // PWM Output
+            out->fioch[fionum].signal = FIO_PWM;
+            out->fioch[fionum].direction = FIO_OUTPUT;
+            // The choice of edge is arbitrary, so take it from the original
+            out->fioch[fionum].edge = dconf[devnum].fioch[fionum].edge;
+            if(dconf[devnum].fioch[fionum].edge==FIO_FALLING){
+                // Read the start index
+                sprintf(stemp, "DIO%d_EF_CONFIG_B", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp2);
+                // Read the stop index
+                sprintf(stemp, "DIO%d_EF_CONFIG_A", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp1);
+            }else{
+                // Read the start index
+                sprintf(stemp, "DIO%d_EF_CONFIG_B", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp1);
+                // Read the stop index
+                sprintf(stemp, "DIO%d_EF_CONFIG_A", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp2);
+            }
+            if(err){
+                fprintf(stderr,"DOWNLOAD: Failed to download FIO ch%d PWM parameters\n",
+                    channel);
+                goto lconf_downloadfail;
+            }
+            // Calculate phase
+            out->fioch[fionum].phase = ftemp1 * 360. / fio_clk_roll;
+            // Calculate duty
+            ftemp2 -= ftemp1;
+            // If the waveform has wrapped, unwrap it
+            if(ftemp2 < 0)
+                ftemp2 += fio_clk_roll;
+            out->fioch[fionum].duty = ftemp2 / fio_clk_roll;
+        }else if(fioindex == 3){
+            // Rising edge frequency measurement
+            out->fioch[fionum].signal = FIO_FREQUENCY;
+            out->fioch[fionum].direction = FIO_INPUT;
+            out->fioch[fionum].edge = FIO_RISING;
+        }else if(fioindex == 4){
+            // Falling edge frequency measurement
+            out->fioch[fionum].signal = FIO_FREQUENCY;
+            out->fioch[fionum].direction = FIO_INPUT;
+            out->fioch[fionum].edge = FIO_FALLING;
+        }else if(fioindex == 5){
+            // Pulse width measurement
+            out->fioch[fionum].signal = FIO_PWM;
+            out->fioch[fionum].direction = FIO_INPUT;
+            out->fioch[fionum].edge = dconf[devnum].fioch[fionum].edge;
+        }else if(fioindex == 6){
+            // Verify that the sister channel has also been configured
+            sprintf(stemp, "DIO%d_EF_INDEX", channel+1);
+            err = err ? err : LJM_eReadName( handle, stemp, &ftemp);
+            if(ftemp != 6){
+                fprintf(stderr, "DOWNLOAD: Channel %d is set to phase, but %d is not.\n",
+                    channel, channel+1);
+            }
+            
+            // Phase measurement
+            out->fioch[fionum].signal = FIO_PHASE;
+            out->fioch[fionum].direction = FIO_INPUT;
+            // Get the edge indicator
+            sprintf(stemp, "DIO%d_EF_CONFIG_A", channel);
+            err = err ? err : LJM_eReadName( handle, stemp, &ftemp);
+            if(err){
+                fprintf(stderr, "DOWNLOAD: Failed to read digital phase input parameters.\n");
+                goto lconf_downloadfail;
+            }
+            if(ftemp==0)
+                out->fioch[fionum].edge = FIO_FALLING;
+            else if(ftemp==1)
+                out->fioch[fionum].edge = FIO_RISING;
+            else{
+                fprintf(stderr,"DOWNLOAD: FIO channel %d phase measurement edge invalid (%d)\n.",
+                    channel, (int) ftemp);
+                out->fioch[fionum].edge = FIO_RISING;
+            }
+        }else if(fioindex == 8){
+            // Counter
+            out->fioch[fionum].signal = FIO_COUNT;
+            out->fioch[fionum].direction = FIO_INPUT;
+            out->fioch[fionum].debounce = FIO_DEBOUNCE_NONE;
+        }else if(fioindex == 9){
+            // Counter with debounce
+            out->fioch[fionum].signal = FIO_COUNT;
+            out->fioch[fionum].direction = FIO_INPUT;
+            // Get the timeout interval
+            sprintf(stemp, "DIO%d_EF_CONFIG_A", channel);
+            err = err ? err : LJM_eReadName( handle, stemp, &ftemp1);
+            // Get the debounce mode
+            sprintf(stemp, "DIO%d_EF_CONFIG_B", channel);
+            err = err ? err : LJM_eReadName( handle, stemp, &ftemp2);
+            if(err){
+                fprintf(stderr, "DOWNLOAD: Failed to download counter debounce settings.\n");
+                goto lconf_downloadfail;
+            }
+            out->fioch[fionum].time = ftemp1;
+            // Interpret the debounce mode
+            if(ftemp2==0){
+                out->fioch[fionum].edge=FIO_FALLING;
+                out->fioch[fionum].debounce=FIO_DEBOUNCE_RESTART;
+            }else if(ftemp2==1){
+                out->fioch[fionum].edge=FIO_RISING;
+                out->fioch[fionum].debounce=FIO_DEBOUNCE_RESTART;
+            }else if(ftemp2==2){
+                out->fioch[fionum].edge=FIO_ALL;
+                out->fioch[fionum].debounce=FIO_DEBOUNCE_RESTART;
+            }else if(ftemp2==3){
+                out->fioch[fionum].edge=FIO_FALLING;
+                out->fioch[fionum].debounce=FIO_DEBOUNCE_FIXED;
+            }else if(ftemp2==4){
+                out->fioch[fionum].edge=FIO_RISING;
+                out->fioch[fionum].debounce=FIO_DEBOUNCE_FIXED;
+            }else if(ftemp2==5){
+                out->fioch[fionum].edge=FIO_FALLING;
+                out->fioch[fionum].debounce=FIO_DEBOUNCE_MINIMUM;
+            }else if(ftemp2==6){
+                out->fioch[fionum].edge=FIO_RISING;
+                out->fioch[fionum].debounce=FIO_DEBOUNCE_MINIMUM;
+            }
+        }else if(fioindex == 10){
+            out->fioch[fionum].signal = FIO_QUADRATURE;
+        }
     }
 
     return LCONF_NOERR;
@@ -1720,7 +1925,7 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
 
 
 void show_config(DEVCONF* dconf, const unsigned int devnum){
-    int ainum,aonum,metanum,metacnt;
+    int ainum,aonum,fionum,metanum,metacnt;
     char value1[LCONF_MAX_STR], value2[LCONF_MAX_STR];
     DEVCONF live;
 
@@ -1784,6 +1989,93 @@ void show_config(DEVCONF* dconf, const unsigned int devnum){
         sprintf(value1, "%.3f", dconf[devnum].aoch[aonum].duty);
         print_color("Duty Cycle",value1,"?");
     }
+    // Show FIO parameters
+    sprintf(value1, "%d", dconf[devnum].nfioch);
+    sprintf(value2, "%d", live.nfioch);
+    print_color("\nFIO Channels", value1, value2);
+    if(dconf[devnum].nfioch>0){
+        sprintf(value1, "%.1f", dconf[devnum].fiofrequency);
+        sprintf(value2, "%.1f", live.fiofrequency);
+        print_color("FIO Frequency (Hz)", value1, value2);
+    }
+    for(fionum=0; fionum<dconf[devnum].nfioch; fionum++){
+        printf("Flexible Input/Output [%d]:\n", fionum);
+        sprintf(value1, "%d", dconf[devnum].fioch[fionum].channel);
+        sprintf(value2, "%d", live.fioch[fionum].channel);
+        print_color("Channel",value1,value2);
+        if(dconf[devnum].fioch[fionum].signal==FIO_PWM)
+            sprintf(value1, "PWM");
+        else if(dconf[devnum].fioch[fionum].signal==FIO_COUNT)
+            sprintf(value1, "COUNT");
+        else if(dconf[devnum].fioch[fionum].signal==FIO_FREQUENCY)
+            sprintf(value1, "FREQUENCY");
+        else if(dconf[devnum].fioch[fionum].signal==FIO_PHASE)
+            sprintf(value1, "PHASE");
+        else if(dconf[devnum].fioch[fionum].signal==FIO_QUADRATURE)
+            sprintf(value1, "QUADRATURE");
+        else
+            sprintf(value1, "NONE");
+
+        if(live.fioch[fionum].signal==FIO_PWM)
+            sprintf(value2, "PWM");
+        else if(live.fioch[fionum].signal==FIO_COUNT)
+            sprintf(value2, "COUNT");
+        else if(live.fioch[fionum].signal==FIO_FREQUENCY)
+            sprintf(value2, "FREQUENCY");
+        else if(live.fioch[fionum].signal==FIO_PHASE)
+            sprintf(value2, "PHASE");
+        else if(live.fioch[fionum].signal==FIO_QUADRATURE)
+            sprintf(value2, "QUADRATURE");
+        else
+            sprintf(value2, "NONE");
+        print_color("Signal", value1, value2);
+
+        if(dconf[devnum].fioch[fionum].direction==FIO_INPUT)
+            sprintf(value1, "INPUT");
+        else if(dconf[devnum].fioch[fionum].direction==FIO_OUTPUT)
+            sprintf(value1, "OUTPUT");
+        else
+            sprintf(value1, "?");
+        if(live.fioch[fionum].direction==FIO_INPUT)
+            sprintf(value2, "INPUT");
+        else if(live.fioch[fionum].direction==FIO_OUTPUT)
+            sprintf(value2, "OUTPUT");
+        else
+            sprintf(value2, "?");
+        print_color("Direction",value1,value2);
+
+        if(dconf[devnum].fioch[fionum].edge==FIO_RISING)
+            sprintf(value1, "RISING");
+        else if(dconf[devnum].fioch[fionum].edge==FIO_FALLING)
+            sprintf(value1, "FALLING");
+        else if(dconf[devnum].fioch[fionum].edge==FIO_ALL)
+            sprintf(value1, "ALL");
+        else
+            sprintf(value1, "?");
+        if(live.fioch[fionum].edge==FIO_RISING)
+            sprintf(value2, "RISING");
+        else if(live.fioch[fionum].edge==FIO_FALLING)
+            sprintf(value2, "FALLING");
+        else if(live.fioch[fionum].edge==FIO_ALL)
+            sprintf(value2, "ALL");
+        else
+            sprintf(value2, "?");
+        print_color("Edge",value1,value2);
+
+        sprintf(value1, "%.1f", dconf[devnum].fioch[fionum].time);
+        sprintf(value2, "%.1f", live.fioch[fionum].time);
+        print_color("Time (us)",value1,value2);
+        sprintf(value1, "%.3f", dconf[devnum].fioch[fionum].duty);
+        sprintf(value2, "%.3f", live.fioch[fionum].duty);
+        print_color("Duty cycle",value1,value2);
+        sprintf(value1, "%.1f", dconf[devnum].fioch[fionum].phase);
+        sprintf(value2, "%.1f", live.fioch[fionum].phase);
+        print_color("Phase (deg)",value1,value2);
+        sprintf(value1, "%d", dconf[devnum].fioch[fionum].counts);
+        sprintf(value2, "%d", live.fioch[fionum].counts);
+        print_color("Counts",value1,value2);
+    }
+
     // count the meta parameters
     for(metacnt=0;\
             metacnt<LCONF_MAX_META && \
@@ -1811,6 +2103,127 @@ void show_config(DEVCONF* dconf, const unsigned int devnum){
                 printf(LCONF_COLOR_RED "%19s ( ? ) **CORRUPT**\n" LCONF_COLOR_NULL,
                     dconf[devnum].meta[metanum].param);
         }
+}
+
+
+
+int update_fio(DEVCONF* dconf, const unsigned int devnum){
+    int handle, channel, fionum, itemp, itemp1, itemp2;
+    double ftemp, ftemp1, ftemp2;
+    char stemp[LCONF_MAX_STR];
+    unsigned int fio_clk_roll, fio_clk_div;
+    int err = 0;
+
+    handle = dconf[devnum].handle;
+
+    // Get the roll value
+    err = err ? err : LJM_eReadName(handle, "DIO_EF_CLOCK0_ROLL_VALUE", &ftemp);
+    fio_clk_roll = (unsigned int) ftemp;
+    // Get the divisor
+    err = err ? err : LJM_eReadName(handle, "DIO_EF_CLOCK0_DIVISOR", &ftemp);
+    fio_clk_div = (unsigned int) ftemp;
+    
+    // Configure the FIO channels
+    for(fionum=0; fionum<dconf[devnum].nfioch; fionum++){
+        channel = dconf[devnum].fioch[fionum].channel;
+        switch(dconf[devnum].fioch[fionum].signal){
+            // Pulse-width modulation
+            case FIO_PWM:
+                // PWM input
+                if(dconf[devnum].fioch[fionum].direction==FIO_INPUT){
+                    // Get the time high
+                    sprintf(stemp, "DIO%d_EF_READ_A", channel);
+                    err = err ? err : LJM_eReadName( handle, stemp, &ftemp);
+                    // Get the time low
+                    sprintf(stemp, "DIO%d_EF_READ_B", channel);
+                    err = err ? err : LJM_eReadName( handle, stemp, &ftemp1);
+                    ftemp2 = ftemp + ftemp1;
+
+                    dconf[devnum].fioch[fionum].counts = (unsigned int) ftemp2;
+                    dconf[devnum].fioch[fionum].time = ftemp2 * fio_clk_div / LCONF_CLOCK_MHZ;
+                    dconf[devnum].fioch[fionum].phase = 0.;
+                    if(dconf[devnum].fioch[fionum].edge==FIO_FALLING){
+                        dconf[devnum].fioch[fionum].duty = ftemp1 / ftemp2;
+                    }else{
+                        dconf[devnum].fioch[fionum].duty = ftemp / ftemp2;
+                    }
+
+                // PWM output
+                }else{
+                    // Calculate the start index
+                    // Unwrap the phase first (lazy method)
+                    while(dconf[devnum].fioch[fionum].phase<0.)
+                        dconf[devnum].fioch[fionum].phase += 360.;
+                    itemp1 = fio_clk_roll * (dconf[devnum].fioch[fionum].phase / 360.);
+                    itemp1 %= fio_clk_roll;
+                    // Calculate the stop index
+                    itemp2 = fio_clk_roll * dconf[devnum].fioch[fionum].duty;
+                    itemp2 = (((long int) itemp1) + ((long int) itemp2))%fio_clk_roll;
+                    if(dconf[devnum].fioch[fionum].edge==FIO_FALLING){
+                        // Write the start index
+                        sprintf(stemp, "DIO%d_EF_CONFIG_B", channel);
+                        err = err ? err : LJM_eWriteName( handle, stemp, itemp2);
+                        // Write the stop index
+                        sprintf(stemp, "DIO%d_EF_CONFIG_A", channel);
+                        err = err ? err : LJM_eWriteName( handle, stemp, itemp1);
+                    }else{
+                        // Write the start index
+                        sprintf(stemp, "DIO%d_EF_CONFIG_B", channel);
+                        err = err ? err : LJM_eWriteName( handle, stemp, itemp1);
+                        // Write the stop index
+                        sprintf(stemp, "DIO%d_EF_CONFIG_A", channel);
+                        err = err ? err : LJM_eWriteName( handle, stemp, itemp2);
+                    }
+                    sprintf(stemp, "DIO%d_EF_ENABLE", channel);
+                    err = err ? err : LJM_eWriteName( handle, stemp, 1);
+                }
+            break;
+            case FIO_COUNT:
+                sprintf(stemp, "DIO%d_EF_READ_A", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp);
+                dconf[devnum].fioch[fionum].counts = (unsigned int) ftemp;
+                dconf[devnum].fioch[fionum].time = 0.;
+                dconf[devnum].fioch[fionum].duty = 0.;
+                dconf[devnum].fioch[fionum].phase = 0.;
+            break;
+            case FIO_FREQUENCY:
+                sprintf(stemp, "DIO%d_EF_READ_A", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp);
+                dconf[devnum].fioch[fionum].counts = (unsigned int) ftemp;
+                dconf[devnum].fioch[fionum].time = ftemp * fio_clk_div / LCONF_CLOCK_MHZ;
+                dconf[devnum].fioch[fionum].duty = 0.;
+                dconf[devnum].fioch[fionum].phase = 0.;
+            break;
+            case FIO_PHASE:
+                sprintf(stemp, "DIO%d_EF_READ_A", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp);
+                dconf[devnum].fioch[fionum].counts = (unsigned int) ftemp;
+                dconf[devnum].fioch[fionum].time = ftemp * fio_clk_div / LCONF_CLOCK_MHZ;
+                dconf[devnum].fioch[fionum].duty = 0.;
+                dconf[devnum].fioch[fionum].phase = 0.;
+            break;
+            case FIO_QUADRATURE:
+                sprintf(stemp, "DIO%d_EF_READ_A", channel);
+                err = err ? err : LJM_eReadName( handle, stemp, &ftemp);
+                dconf[devnum].fioch[fionum].counts = (unsigned int) ftemp;
+                dconf[devnum].fioch[fionum].time = 0;
+                dconf[devnum].fioch[fionum].duty = 0.;
+                dconf[devnum].fioch[fionum].phase = 0.;
+            break;
+        }
+        if(err){
+            fprintf(stderr, "FIO_UPDATE: Failed while working on FIO channel %d\n.", channel);
+            break;
+        }
+    }
+
+    if(err){
+        fprintf(stderr,"LCONFIG: Error updating Flexible IO parameters on device %d\n", devnum);
+        LJM_ErrorToString(err, err_str);
+        fprintf(stderr,"%s\n",err_str);
+        return LCONF_ERROR;
+    }
+    return LCONF_NOERR;
 }
 
 

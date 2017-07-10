@@ -212,7 +212,7 @@ typedef struct fioconf {
     double time;        // Time parameter (us)
     double duty;        // PWM duty cycle (0-1)
     double phase;       // Phase parameters (degrees)
-    unsigned int count; // Pulse count
+    unsigned int counts; // Pulse count
 } FIOCONF;
 
 // The METACONF is a struct for user-defined flexible parameters.
@@ -238,28 +238,39 @@ typedef struct filestream {
 } FILESTREAM;
 
 
+
 typedef struct devconf {
+    // Global configuration
     int connection;                 // connection type index
     char ip[LCONF_MAX_STR];         // ip address string
     char gateway[LCONF_MAX_STR];    // gateway address string
     char subnet[LCONF_MAX_STR];     // subnet mask string
     char serial[LCONF_MAX_STR];     // serial number string
-    AICONF aich[LCONF_MAX_NAICH];    // analog input configuration array
-    unsigned int naich;             // number of configured analog input channels
-    AOCONF aoch[LCONF_MAX_NAOCH];   // analog output configuration array
-    unsigned int naoch;             // number of configured analog output channels
-    double fiofrequency;            // flexible input/output frequency
-    FIOCONF fioch[LCONF_MAX_NFIOCH]; // flexible digital input/output
-    unsigned int nfioch;            // how many of the FIO are configured?
     int handle;                     // device handle
     double samplehz;                // *sample rate in Hz
     double settleus;                // *settling time in us
     unsigned int nsample;           // *number of samples per read
+    // Analog input
+    AICONF aich[LCONF_MAX_NAICH];    // analog input configuration array
+    unsigned int naich;             // number of configured analog input channels
+    // Analog output
+    AOCONF aoch[LCONF_MAX_NAOCH];   // analog output configuration array
+    unsigned int naoch;             // number of configured analog output channels
+    // Flexible Input/output
+    double fiofrequency;            // flexible input/output frequency
+    FIOCONF fioch[LCONF_MAX_NFIOCH]; // flexible digital input/output
+    unsigned int nfioch;            // how many of the FIO are configured?
+    // Trigger
+    int trigchannel;                // Which channel should be used for the trigger?
+    unsigned int trigpre;           // How many pre-trigger samples?
+    unsigned int trigpre_collected; // How many pre-trigger samples have been collected?
+    double triglevel;               // What voltage should the trigger seek?
+    enum {TRIG_RISING, TRIG_FALLING, TRIG_ALL} trigedge; // Trigger edge
+    enum {TRIG_IDLE, TRIG_PRE, TRIG_ARMED, TRIG_ACTIVE} trigstate; // Trigger state
+    // Meta & filestream
     METACONF meta[LCONF_MAX_META];  // *meta parameters
     FILESTREAM FS;                  // active file stream?
 } DEVCONF;
-
-
 
 
 
@@ -420,32 +431,97 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   period.  For a triangle wave, the duty cycle indicates the percentage of
 .   the period that will be spent rising, so a sawtooth wave can be created
 .   with AODUTY values of 0.0 and 1.0.
+-TRIGCHANNEL
+.   Which analog input should be monitored to generate the software trigger?
+.   This non-negative integer does NOT specify the physical analog channel. It
+.   specifies which of the analog measurements should be monitored for a 
+.   trigger.
+.
+.   The read_data_stream() function is responsible for monitoring the number of
+.   samples and looking for a trigger.  There are four trigger states indicated
+.   by the TRIGSTATE member of the DEVCONF structure.
+.       TRIG_IDLE - the trigger is inactive and data will be collected as 
+.                   normal.
+.       TRIG_PRE - data collection has begun recently, and TRIGPRE samples have 
+.                   not yet been collected.  No trigger is allowed yet.
+.       TRIG_ARMED - The pre-trigger buffer has been satisfied and 
+.                   read_data_stream() is actively looking for a trigger. Data
+.                   should continue streaming to a pre-trigger buffer.
+.       TRIG_ACTIVE - A trigger event has been found, and normal data collection
+.                   has begun.
+.   read_data_stream() is responsible for maintaining this state variable, but
+.   it does NOT deal with pre-trigger buffers automatically. read_file_stream()
+.   does.
+-TRIGLEVEL
+.   The voltage threshold on which to trigger.  Accepts a floating point.
+-TRIGEDGE
+.   Accepts "rising", "falling", or "all" to describe which
+-TRIGPRE
+.   Pretrigger sample count.  This non-negative integer indicates how many 
+.   samples should be collected on each channel before a trigger is allowed.
 -FIOFREQUENCY
 .   Sets the frequency scale for all FIO extended features.  This parameter
 .   determines how often the FIO clock updates.  Pulse and PWM outputs will
-.   exhibit this frequency.
+.   exhibit this frequency.  Unlike all other FIO parameters, the frequency
+.   is set globally, so there is only one FIOFREQUENCY parameter, rather than
+.   one for each channel.
 -FIOCHANNEL
 .   Like the AOCHANNEL and AICHANNEL, this determines which of the FIO channels
 .   is being set.
 -FIOSIGNAL
-.   Sets the signal type used for this channel.  Valid values are:
-.       pwm - Pulse-width or duty cycle signal
-.       count - Edge counter
-.       frequency - Period or frequency tracker
-.       phase - Edge delay (input only)
-.       quadrature - Two-channel encoder quadrature
+.   Sets the signal type used for this channel.  The following is a list of the
+.   supported signal types and how their settings are handled.  Measurements
+.   are collected by executing the update_fio() function and checking the 
+.   member fioch[] member variables, duty, counts, or time.  Their
+.   meaning is listed below each signal type.
+. * PWM - pulse width
+.       Input: valid channels 0,1
+.           FIOEDGE - "rising" indicates duty cycle high, "falling" inverts.
+.           duty - Holds the measured duty cycle
+.           counts - Holds the signal period in counts
+.           time - Holds the signal period in usec
+.       Output: valid channels 0,2,3,4,5
+.           FIOFREQUENCY - Determines the waveform frequency
+.           FIOEDGE - "rising" indicates duty cycle high, "falling" invergs.
+.           FIODUTY - Number 0-1 indicating % time high (low in "falling" mode).
+.           FIODEGREES - Phase of the PWM waveform in degrees.
+. * COUNT - edge counter
+.       Input: valid channels 0,1,2,3,6,7
+.           FIOEDGE - Count rising, falling, or ALL edges.
+.           FIODEBOUNCE - What debounce filter to use?
+.           FIOUSEC - What debounce interval to use?
+.           counts - Holds the measured count.
+.       Output: Not supported
+. * FREQUENCY - period or frequency tracker
+.       Input: valid channels 0,1
+.           FIOUSEC - Holds the measured period.
+.       Output: Not supported
+. * PHASE - Delay between edges on two channels
+.       Input: valid channels are in pairs 0/1 (only one needs to be specified)
+.           FIOEDGE - rising/falling
+.           FIOUSEC - Holds the measured delay between edges
+.       Output: Not supported
+. * QUADRATURE - Two-channel encoder quadrature
+.       Input: valid channels are in pairs 0/1, 2/3, 6/7
+.       (only one needs to be specified)
+.           FIOCOUNT - Holds the measured encoder count
+.       Output: Not supported
 -FIOEDGE
 .   Used by the frequency and phase signals, this parameter determines whether
 .   rising, falling, or both edges should be counted.  Valid values are "all",
 .   "rising", or "falling".
 -FIODEBOUNCE
-.   Used by a count input signal, this parameter indicates what type of filter
-.   (if any) to emply to clean noisy (bouncy) edges.  Valid values are:
-.       none - all qualifying edges are counted
-.       fixed - ignore all edges a certain interval after an edge
+.   Used by a COUNT input signal, this parameter indicates what type of filter
+.   (if any) to emply to clean noisy (bouncy) edges.  The T7 does not implement
+.   all of these filters on all edge types.  Valid edge types are listed in 
+.   parentheses after each description.  Valid values are:
+.       none - all qualifying edges are counted (rising, falling, all)
+.       fixed - ignore all edges a certain interval after an edge 
+                (rising, falling)
 .       reset - like fixed, but the interval resets if an edge occurrs during
-.               the timeout period.
+.               the timeout period. (rising, falling, all)
 .       minimum - count only edges that persist for a minimum interval
+                (rising, falling)
 .   The intervals specified in these debounce modes are set by the FIOUSEC
 .   parameter.
 -FIODIRECTION
@@ -453,12 +529,13 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   be generated or measured.  FIO outputs cannot be streamed, but are set
 .   statically.
 -FIOUSEC
-.   Specifies a time in microseconds.  This is used to debounce a count input.
+.   Specifies a time in microseconds.
 -FIODEGREES
-.   Specifies a phase angle in degrees.  This is used to produce a PWM signal
-.   with phase relative to other channels.
+.   Specifies a phase angle in degrees.
 -FIODUTY
 .   Accepts a floating value from zero to one indicating a PWM duty cycle.
+-FIOCOUNT
+.   An unsigned integer counter value.
 -META
 .   The META keyword begins or ends a stanza in which meta parameters can be 
 .   defined without a type prefix (see below).  Meta parameters are free entry
@@ -601,6 +678,17 @@ int put_meta_int(DEVCONF* dconf, const unsigned int devnum, const char* param, i
 int put_meta_flt(DEVCONF* dconf, const unsigned int devnum, const char* param, double value);
 int put_meta_str(DEVCONF* dconf, const unsigned int devnum, const char* param, char* value);
 
+
+/*UPDATE_FIO
+Refresh Flexible Input/Output parameters.  All DEVCONF FIO parameters will be 
+rewritten to their respective registers and measurements will be downloaded into
+the appropriate FIO channel member variables.
+
+The clock frequency will NOT be updated.  To change the FIOfrequency parameter,
+upload_config() should be re-called.  This will halt acquisition and re-start 
+it.
+*/
+int update_fio(DEVCONF* dconf, const unsigned int devnum);
 
 /*START_DATA_STREAM
 Start a stream operation based on the device configuration for device devnum.

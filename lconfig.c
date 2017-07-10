@@ -191,10 +191,6 @@ void clean_file_stream(FILESTREAM* FS){
 int nistream_config(DEVCONF* dconf, const unsigned int devnum){
     int out, fionum;
     out = dconf[devnum].naich;
-    for(fionum=0; fionum<dconf[devnum].nfioch; fionum++){
-        if(dconf[devnum].fioch[fionum].direction == FIO_INPUT)
-            out++;
-    }
     return out;
 }
 

@@ -5,7 +5,7 @@ Headers and utilities for laboratory measurements and machine control with the
 
 By Chris Martin [crm28@psu.edu](mailto:crm28@psu.edu)
 
-Version 2.03
+Version 3.00
 
 - [About](#about)
 - [Getting started](#start)
@@ -19,9 +19,34 @@ Version 2.03
 ## <a name="about"></a> About
 In the summer of 2016, I realized I needed to be able to adjust my data 
 acquisition parameters day-by-day as I was tweaking and optimizing an 
-experiment.  I love my LabJack, and the folks at LabJack do a great job of documenting their intuitive interface.  HOWEVER, most of us don't memorize dozens of modbus registers, and weeks after an experiment it's often difficult to remember which data file was taken with which DAQ parameters.
+experiment.  I love my LabJack, and the folks at LabJack do a great job of documenting their intuitive interface.  HOWEVER, the effort involved in tweaking DAQ properties on the fly AND documenting them with each experiment can be cumbersome.
 
-This little **L**aboratory **CONFIG**uration system reads and writes configuration and data files, connects to and configures the T7, and automates the jobs I've done most.  As of version 2.02, that includes analog input streaming and analog output simulating a function generator.
+This little **L**aboratory **CONFIG**uration system reads and writes configuration files and automatically writes a header with the current configuration in each data file.  LCONFIG connects to and configures the T7 to perform analog input and output streaming, and automatically configures the flexible digital IO extended features.  
+
+###Features
+LCONFIG allows automatic configuration and control of most of the T7's advanced features.
+
+- Stream sample rate configuration
+- Analog input streaming
+    - Input range
+    - Settling time and resolution
+    - Single-ended vs differential
+- Analog output streaming
+    - Constant value
+    - Sine wave offset, amplitude, frequency
+    - Square wave offset, amplitude, frequency, duty cycle
+    - Sawtooth offset, amplitude, frequency, duty cycle
+    - White noise offset, amplitude, repetition frequency
+- Flexible Input/Output extended features
+    - Two-channel encoder quadrature
+    - Frequency input
+    - Digital counter w/ configurable debounce filter
+    - Line-to-line phase measurement
+    - Pulse width measurement
+    - Pulse width output with configurable phase
+- Simple text-based configuration files
+- Automatic generation of data files
+- Error handling
 
 ## <a name="start"></a> Getting started
 To get the repository,
@@ -34,9 +59,9 @@ To get the repository,
     $ ./drun -h   # prints help
     $ ./dburst -h # prints help
 ```
-`drun` and `dburst` are probably the best places to get started.  They load a configuration file, open the appropriate device connections, initiate the data transfer, and write data files automatically.
+`drun` and `dburst` are binaries built on the LCONFIG system.  `drun` continuously streams data to a file, but the read/write times for most hard drives prevents realizing the full speed of the T7.  `dburst` collects a high speed burst of data and then writes it to a file.  Both executables use the LCONFIG library to load a configuration file, open the appropriate device connections, initiate the data transfer, and write data files automatically.
 
-For writing your own executables, a quick tutorial on programming with the LCONFIG system is laid out in LCONFIG_README with the gritty details in this README.  The absolute authoritative documentation for LCONFIG is the comments in the prototype section of the header itself.  It is always updated with each version change.
+For writing your own executables, a quick tutorial on programming with the LCONFIG system is laid out in LCONFIG_README with the gritty details in this README.  The absolute authoritative documentation for LCONFIG is the comments in the prototype section of the header itself.  It is always updated with each version change.  Versions 2.03 and older used a different system for streaming than version 3.00 and later, so older branches are still available on the git page.
 
 Once you produce your data, there's a good chance that you'll want to analyze it.  If you're a Python user, the lconfig.py module will get you up and running quickly.  Its documentation is inline.
 
@@ -143,6 +168,10 @@ These are the parameters recognized by LCONFIG.  The valid values list the value
 | aoamplitude | floating point                          | Analog Output | Voltage amplitude of the AC component of the signal (ignored for constant signal).
 | aooffset    | floating point                          | Analog Output | Offset (DC) voltage to add to the oscillating (AC) signal.
 | aoduty      | floating point [0-1]                    | Analog Output | The duty cycle of triangle and square waves. This skews the signal to spend more time on one part of the wave than the other.
+| trigchannel | integer [0-13]                          | Global        | The analog input to use for a software trigger.  This is NOT the physical channel, but the index of the ordered list of configured inputs.
+| triglevel   | floating point [-10. - 10.]             | Global        | Software trigger threshold voltage.
+| trigedge    | rising, falling, all                    | Global        | Software trigger edge type.
+| trigpre     | non-negative integer [>=0]              | Global        | The "pretrigger" is the minimum number of samples per channel PRIOR to the triger event that will be included in the streamed data.
 | aofrequency | floating point                          | Analog Output | Specifies the rate the wave will repeat in Hz.
 | fiofrequency | floating point                         | Global        | Specifies the CLOCK0 rollover frequency.
 | fiochannel  | integer [0-7]                           | Flexible IO   | The physical FIO channel to use for a digital IO operation.
@@ -198,6 +227,21 @@ A structure that holds data relevant to the configuration of a single flexible I
 |duty | `double` | pwm | 0.5 | Indicates the duty cycle (measured or commanded) of a PWM signal.
 |counts | `unsigned int` | count, pwm, phase, frequency | 0 | Indicates the status of a counter input, the measured period of a PWM or frequency input (in ticks), or the measured delay of a phase input (in ticks).
 
+### RINGBUFFER Struct
+This structure is responsible for managing the data stream behind the scenes.  This ring buffer struct is designed to allow data to stream continuously in chunks called "blocks."  These are nothing more than the size of the data blocks sent by `LJM_eReadStream()`, and LCONFIG always sets them to LCONF_SAMPLES_PER_READ samples per channel.
+
+| Member | Subordinate | Type | Description 
+|---|---|:---:|:---
+|size_samples | | `unsigned int` | The total size of the buffer (NOT per channel)
+|blocksize_samples | | `unsigned int` | The total size of each read/write block (NOT per channel)
+|samples_per_read | | `unsigned int` | Samples per channel in each read/write block
+|samples_read | | `unsigned int` | A record of the samples per channel read from the buffer by the application.
+|samples_streamed | | `unsigned int` | A record of the samples per channel read into the buffer from the T7.
+|channels | | `unsigned int` | The number of channels currently in the data stream.
+|read | | `unsigned int` | The index in the data buffer to start reading.  When `read == write`, the buffer is empty.  When the buffer is emptied, `read` is forced to be equal to `size_samples`.
+|write | | `unsigned int` | The index in the data buffer where new samples should be written.
+|buffer | | `double *` | The starting address of the buffer.
+
 ### METACONF Struct
 A structure that defines a single meta parameter
 
@@ -210,14 +254,6 @@ A structure that defines a single meta parameter
 | | fvalue | `double` | A floating point value
 |type | | `char` | A character indicating the meta type: `'f'` for float, `'i'` for int, or `'s'` for a string
 
-### FILESTREAM Struct
-A structure that holds the data needed to manage a data stream directly to a file.  This is used by the `file_stream_XXX` functions.
-
-| Member | Type | Description
-|---|:---:|---
-|file | `FILE*` | Pointer to the open data file
-|buffer | `double*` | Dynamically allocated buffer of samples.  The raw data are stored here as they are being written to the file.
-|samples_per_read | `unsigned int` | The number of samples to receive in each read from the T7.  This is the size of the buffer.
 
 ### DEVCONF Struct
 This structure contains all of the information needed to configure a device.  This is the workhorse data type, and usually it is the only one that needs to be explicitly used in the host application.
@@ -233,6 +269,12 @@ This structure contains all of the information needed to configure a device.  Th
 |naich | `unsigned int` | - | The number of aich entries that have been configured
 |aoch | `AOCONF[LCONF_MAX_NAOCH]` | - | An array of `AOCONF` structs for configuring output channels
 |naoch | `unsigned int` | - | The number of aoch entries that have been configured
+|trigchannel |  `int` | -1 | The `aich` channel to test for a trigger event
+|trigmem |  `unsigned int` | 0 | Memory used in the trigger test
+|triglevel | `double` | 0. | The trigger threshold in volts
+|trigedge | `enum{TRIG_RISING, TRIG_FALLING, TRIG_ALL}` | `TRIG_RISING` | Trigger edge type
+|trigstate | `enum{TRIG_IDLE, TRIG_PRE, TRIG_ARMED, TRIG_ACTIVE}`, | `TRIG_IDLE` | Trigger operational state
+|fiofrequency | `double` | -1 | The flexible digital input/output rollover frequency
 |fioch | `FIOCONF[LCONF_MAX_NFIOCH]` | - | An array of `FIOCONF` structs for configuring flexible digital I/O channels
 |nfioch| `unsigned int` | - | The number of fioch entries that have been configured
 |handle | `int` | - | The device handle returned by the `LJM_Open` function
@@ -240,7 +282,7 @@ This structure contains all of the information needed to configure a device.  Th
 |settleus | `double`| positive time | The multiplexer settling time for each sample in microseconds
 |nsample | `unsigned int` | - | Number of samples to read per each stream read operation
 |meta | `METACONF[LCONF_MAX_META]` | - | An array of meta configuration parameters
-|FS | `FILESTREAM` | - | The currently active file stream (if in use)
+|RB | `RINGBUFFER` | - | The data stream's buffer
 
 ## <a name="functions"></a> The LCONFIG functions
 
@@ -258,13 +300,19 @@ This structure contains all of the information needed to configure a device.  Th
 |show_config| Calls download_config and automatically generates an item-by-item comparison of the T7's current settings and the settings contained in a DEVCONF structure.
 |ndev_config | Returns the number of configured devices in a DEVCONF array
 |nistream_config| Returns the number of configured input channels in a DEVCONF device structure
+|nostream_config| Returns the number of configured output channels in a DEVCONF device
+|status_data_stream| Returns the number of samples streamed from the T7, to the application, and waiting in the buffer
+|iscomplete_data_stream| Returns a 1 if the number of samples streamed into the buffer is greater than or equal to the NSAMPLE configuration parameter
+|isempty_data_stream| Returns a 1 if the buffer has no samples ready to be read
 | [**Data Collection**](#fun:data) ||
-|start_data_stream | Start a data collection process
-|read_data_stream | Read in data from an active data stream
-|stop_data_stream | Stop an active data stream
-|start_file_stream | Start a data stream directly to a file. File streams are slower than data streams.
-|read_file_stream | Read data from an active file stream directly to a file
-|stop_file_stream | Stop an active file stream
+|start_data_stream | Checks the available RAM, allocates the buffer, and starts the acquisition process
+|service_data_stream | Collects new data from the T7, updates the buffer registers, tests for a trigger event, services the trigger state
+|read_data_stream | Returns a pointer into the buffer with the next available data to be read
+|stop_data_stream | Halts the T7's data acquisition process
+|clean_data_stream| Frees the buffer memory
+|init_file_stream | Writes a header to a data file
+|write_file_stream | Calls read_data_stream and writes formatted data to a data file
+|
 |update_fio | Update all flexible I/O measurements and output parameters in the FIOCONF structs
 | [**Meta Configuration**](#fun:meta) ||
 | get_meta_int, get_meta_flt, get_meta_str | Returns a meta parameter integer, floating point, or string value.  
@@ -309,7 +357,7 @@ int open_config(          DEVCONF* dconf,
 int close_config(         DEVCONF* dconf, 
                 const unsigned int devnum)
 ```
-`close_config` closes a connection to the device described in the `devnum` element of the `dconf` array.  The function returns either `LCONF_ERROR` or `LCONF_NOERR` depending on whether an error was raised during execution.
+`close_config` closes a connection to the device described in the `devnum` element of the `dconf` array.  If a ringbuffer is still allocated to the device, it is freed, so it is important NOT to call `close_config` before data is read from the buffer.  The function returns either `LCONF_ERROR` or `LCONF_NOERR` depending on whether an error was raised during execution.
 
 ```C
 int upload_config(        DEVCONF* dconf, 
@@ -353,37 +401,68 @@ int start_data_stream(    DEVCONF* dconf,
                 const unsigned int devnum,
                                int samples_per_read)
 
+int service_data_stream(  DEVCONF* dconf, 
+                const unsigned int devnum)
+
 int read_data_stream(     DEVCONF* dconf, 
                 const unsigned int devnum, 
-                            double *data)
+                            double **data, 
+                      unsigned int *channels, 
+                      unsigned int *samples_per_read)
 
 int stop_data_stream(     DEVCONF* dconf, 
                 const unsigned int devnum)
 ```
-There are three steps to the data acquisition process; start, read, and stop.  `start_data_stream` starts the data collection process on the device `devnum` in the `dconf` array.  The device will be configured to transfer packets with `samples_per_read` samples per channel.  If `samples_per_read` is negative, then the `nsample` configuration parameter will be used instead.
+There are four steps to a data acquisition process; start, service, read, and stop.  This constitutes a substantial change from version 2.03 and earlier, which had no service function.  Version 3 uses an automatically configured ring buffer, so the application never needs to perform memory management.  The addition of a service function means that the process of streaming new data into the buffer can be separated from the process of reading data from the buffer.  It also means that data streaming might not actually result in new data being made available (for example if a trigger event has not registered).
 
-The `read_data_stream` function waits until a packet is available from the device and writes it to the `data` array.  Each call to `read_data_stream` will write `samples_per_read * nistream_config()` samples to the `data` array. This function must be called repeatedly and often enough to prevent a backlog of data.  If an excessive backlog builds higher than LCONF_BACKLOG_THRESHOLD samples, an error will be raised.
+`start_data_stream` configures the LCONFIG buffer, and starts the T7's data collection process on the device `devnum` in the `dconf` array.  The device will be configured to transfer packets with `samples_per_read` samples per channel.  If `samples_per_read` is negative, then the LCONF_SAMPLES_PER_READ constant will be used instead.  This information is recorded in the `RB` ringbuffer struct.  The buffer can be substantial since RAM checks are performed prior to allocating memory.
 
-The process is halted by the `stop_data_stream` function.
+The `service_data_stream` function retrieves a new block of data into the ring buffer.  If the trigger is configured, the service function is responsible for managing the pretrigger buffering, testing for whether a trigger event has occurred, and managing the ringbuffer registers.
+
+When data is available in the ring buffer, the `read_data_stream` function returns a double precision array, `data` representing a 2D array with shape `samples_per_read` x `channels`.  The `s` sample of `c` channel can be retrieved by `data[s*channels + c]`, and the total size of the `data` array is `samples_per_read * channels`.  If there is no data available, then `data` will be `NULL`.
+
+The data acquisition process is halted by the `stop_data_stream` function, but the buffer is left intact.  As a result, data can be slowly read from the buffer long after the data collection is complete.  Before a new stream process can be started, the `clean_data_stream` function should be called to free the buffer.  In applications where only one stream operation will be executed, it may be easier to allow `close_config` to clean up the buffer instead.
 
 ```C
-int start_file_stream(    DEVCONF* dconf, 
-                const unsigned int devnum,
-                               int samples_per_read, 
-                        const char *filename)
-                        
-int read_file_stream(     DEVCONF* dconf, 
-                const unsigned int devnum)
-                
-int stop_file_stream(     DEVCONF* dconf, 
-                const unsigned int devnum)
+void status_data_stream( DEVCONF* dconf, 
+               const unsigned int devnum,
+                     unsigned int *samples_streamed, 
+                     unsigned int *samples_read,
+                     unsigned int *samples_waiting);
+                     
+int iscomplete_data_stream(DEVCONF* dconf, 
+                 const unsigned int devnum);
+                 
+int isempty_data_stream( DEVCONF* dconf, 
+               const unsigned int devnum);
 ```
-Similar to the data stream functions, these file stream functions write samples directly to a formatted text file, and do not require a data buffer.
+These functions are handy tools for monitoring the progress of a data collection process.  The `status_data_stream` function returns the per-channel stream counts streamed into, read out of, and waiting in the ring buffer.  Authors should keep in mind that the `service_data_stream` function adjusts the `samples_streamed` value to exclude data that was thrown away in the triggering process.
+
+`iscomplete_data_stream` returns a 1 or 0 to indicate whether the total number of `samples_streamed` per channel has exceeded the `nsample` parameter found in the configuration file.
+
+`isempty_data_stream` returns a 1 or 0 to indicate whether the ring buffer has been exhausted by read operations.
+
+```C
+int init_file_stream(    DEVCONF* dconf, 
+                const unsigned int devnum,
+                             FILE* FF)
+                        
+int write_file_stream(     DEVCONF* dconf, 
+                const unsigned int devnum,
+                             FILE* FF)
+
+```
+These are tools for automatically writing data files from the stream data.  They accept a file pointer from an open `iostream` file.  In versions 2.03 and older, LCONFIG was responsible for managing the file opening and closing process, but as of version 3.00, it is up the application to provide an open file.
+
+`init_file_stream` writes a configuration file header to the data file.  It also adds a timestamp indicating the date and time that `init_file_stream` was executed.  It should be emphasized that (especially where triggers are involved) substantial time can pass between this timestamp and the availability of data.  Care should be taken if precise absolute time values are needed.
+
+`write_file_stream` calls `read_data_stream` and prints an ascii formatted data array into the open file provided.
+
 
 ```C
 int update_fio(DEVCONF* dconf, const unsigned int devnum)
 ```
-Users can write to the FIO parameters in the `DEVCONF` structure directly.  For example, the following code might be used to adjust flexible I/O channel 0's duty cycle to 25%.
+The FIO channels represent the only features in LCONFIG that require users to interact manually with the DEVCONF struct member variables.  `update_fio` is called to command the T7 to react to changes in the FIO settings or to obtain new FIO measurements.  For example, the following code might be used to adjust flexible I/O channel 0's duty cycle to 25%.
 ```
 dconf[devnum].fioch[0].duty = .25;
 update_fio(dconf,devnum);
@@ -395,7 +474,7 @@ int update_fio(dconf, devnum);
 frequency = 1e6 / dconf[devnum].fioch[0].time;
 ```
 
-The T7 supports streaming digital I/O, but `LCONFIG` does not support it as of version 2.03.
+The T7 supports streaming digital I/O, but `LCONFIG` does not support it as of version 3.00.  There are not currently plans to add this feature.
 
 <a name='fun:meta'></a>
 ### Meta Configuration
@@ -442,7 +521,7 @@ These are the compiler constants provided by `lconfig.h`.
 | Constant | Value | Description
 |--------|:-----:|-------------|
 | TWOPI  | 6.283185307179586 | 2*pi comes in handy for signal calculations
-| LCONF_VERSION | 2.02 | The floating point version
+| LCONF_VERSION | 3.00 | The floating point version
 | LCONF_MAX_STR | 32   | The longest character string permitted when reading or writing values and parameters
 | LCONF_MAX_READ | "%32s" | Format string used for reading parameters and values
 | LCONF_MAX_STCH | 15     | Maximum number of stream channels (both input and output  permitted in the DEVCONF struct
@@ -453,6 +532,8 @@ These are the compiler constants provided by `lconfig.h`.
 | LCONF_MAX_AIRES | 8     | Maximum resolution index allowed
 | LCONF_MAX_AOBUFFER | 512 | Maximum analog output buffer for repeating functions
 | LCONF_BACKLOG_THRESHOLD | 1024 | Raise a warning if LJM reports a stream backlog greater than this value
+| LCONF_CLOCK_MHZ | 80.0 | The T7 clock frequency in MHz
+| LCONF_SAMPLES_PER_READ | 64 | The default samples_per_read value in streaming operations
 | LCONF_DEF_NSAMPLE | 64 | Default value for the `nsample` parameter; used when it is unspecified
 | LCONF_DEF_AI_NCH | 199 | Default value for the `ainegative` parameter
 | LCONF_DEF_AI_RANGE | 10. | Default value for the `airange` parameter

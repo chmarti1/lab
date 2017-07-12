@@ -114,6 +114,7 @@ int main(int argc, char *argv[]){
     char stemp[MAXSTR];
     unsigned int count; // count the number of loops for safe exit
     DEVCONF dconf[NDEV];
+    FILE* dfile;
 
     // Parse the command-line options
     if(parse_options(argc, argv))
@@ -195,25 +196,39 @@ int main(int argc, char *argv[]){
             close_config(dconf,0);
             return -1;
         }
-        if(start_file_stream(dconf, 0, -1, pre_file)){
+        if(start_data_stream(dconf, 0, -1)){
             printf("FAILED\n");
             fprintf(stderr, "DRUN failed to start preliminary data collection.\n");
             close_config(dconf,0);
             return -1;
         }
-        if(read_file_stream(dconf, 0)){
-            printf("FAILED\n");
-            fprintf(stderr, "DRUN failed while trying to read the preliminary data!\n");
-            stop_file_stream(dconf,0);
-            close_config(dconf,0);
-            return -1;
+        // STREAM!
+        while(!iscomplete_data_stream(dconf,0)){
+            if(service_data_stream(dconf, 0)){
+                fprintf(stderr, "\nDRUN failed while servicing the T7 connection!\n");
+                stop_data_stream(dconf,0);
+                close_config(dconf,0);
+                return -1;
+            }
         }
-        if(stop_file_stream(dconf, 0)){
+        if(stop_data_stream(dconf, 0)){
             printf("FAILED\n");
             fprintf(stderr, "DRUN failed to halt preliminary data collection!\n");
             close_config(dconf,0);
             return -1;
         }
+
+        dfile = fopen(pre_file,"w");
+        if(dfile == NULL){
+            fprintf(stderr, "DRUN failed to open pre-data file: %s\n", pre_file);
+            close_config(dconf,0);
+            return -1;
+        }
+        init_data_file(dconf,0,dfile);
+        while(!isempty_data_stream(dconf,0))
+            write_data_file(dconf,0,dfile);
+        fclose(dfile);
+        dfile = NULL;
         close_config(dconf,0);
         printf("DONE\n");
     }
@@ -231,27 +246,41 @@ int main(int argc, char *argv[]){
         close_config(dconf,stream_dev);
         return -1;
     }
-    if(start_file_stream(dconf, stream_dev, -1, data_file)){
+    show_config(dconf, stream_dev);
+
+    // Prep the data file
+    dfile = fopen(data_file,"w");
+    if(dfile == NULL){
+        fprintf(stderr, "DRUN failed to open pre-data file: %s\n", pre_file);
+        close_config(dconf,0);
+        return -1;
+    }
+    init_data_file(dconf, stream_dev, dfile);
+
+    // Setup the keypress for exit conditions
+    printf("Press \"Q\" to quit the process\nStreaming measurements...");
+    fflush(stdout);
+    setup_keypress();
+
+    // Start the data collection
+    if(start_data_stream(dconf, stream_dev, -1)){
         printf("FAILED\n");
         fprintf(stderr, "DRUN failed to start the data stream.\n");
         close_config(dconf,stream_dev);
         return -1;
     }
-    show_config(dconf, stream_dev);
 
-    // Setup the keypress for exit conditions
-    printf("Press \"Q\" to quit the process\nStreaming measurements...");
-    setup_keypress();
     go = 1;
     for(count=0; go; count++){
-        if(read_file_stream(dconf, stream_dev)){
+        if(service_data_stream(dconf, stream_dev)){
             printf("FAILED\n");
-            fprintf(stderr, "DRUN failed while trying to read the data stream!\n");
-            stop_file_stream(dconf,stream_dev);
+            fprintf(stderr, "DRUN failed while trying to service the data stream!\n");
+            stop_data_stream(dconf,stream_dev);
             close_config(dconf,stream_dev);
             finish_keypress();
             return -1;
         }
+        write_data_file(dconf, stream_dev, dfile);
 
         // Test for exit conditions
         if(keypress() && getchar() == 'Q')
@@ -261,7 +290,7 @@ int main(int argc, char *argv[]){
     }
     finish_keypress();
 
-    if(stop_file_stream(dconf, stream_dev)){
+    if(stop_data_stream(dconf, stream_dev)){
         printf("FAILED\n");
         fprintf(stderr, "DRUN failed to halt the data stream!\n");
         close_config(dconf,stream_dev);
@@ -284,25 +313,39 @@ int main(int argc, char *argv[]){
             close_config(dconf,2);
             return -1;
         }
-        if(start_file_stream(dconf, 2, -1, post_file)){
+        if(start_data_stream(dconf, 2, -1)){
             printf("FAILED\n");
             fprintf(stderr, "DRUN failed to start post data collection.\n");
             close_config(dconf,2);
             return -1;
         }
-        if(read_file_stream(dconf, 2)){
+        // STREAM!
+        while(!iscomplete_data_stream(dconf,2)){
+            if(service_data_stream(dconf, 2)){
+                fprintf(stderr, "\nDRUN failed while servicing the T7 connection!\n");
+                stop_data_stream(dconf,2);
+                close_config(dconf,2);
+                return -1;
+            }
+        }
+        if(stop_data_stream(dconf, 2)){
             printf("FAILED\n");
-            fprintf(stderr, "DRUN failed while trying to read the post data!\n");
-            stop_file_stream(dconf,2);
+            fprintf(stderr, "DRUN failed to halt preliminary data collection!\n");
             close_config(dconf,2);
             return -1;
         }
-        if(stop_file_stream(dconf, 2)){
-            printf("FAILED\n");
-            fprintf(stderr, "DRUN failed to halt post data collection!\n");
+
+        dfile = fopen(post_file,"w");
+        if(dfile == NULL){
+            fprintf(stderr, "DRUN failed to open post-data file: %s\n", post_file);
             close_config(dconf,2);
             return -1;
         }
+        init_data_file(dconf,2,dfile);
+        while(!isempty_data_stream(dconf,2))
+            write_data_file(dconf,2,dfile);
+        fclose(dfile);
+        dfile = NULL;
         close_config(dconf,2);
         printf("DONE\n");
     }

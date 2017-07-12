@@ -35,7 +35,7 @@ $chmod a+x your_exec.bin
 #include <LabJackM.h>
 
 
-#define LCONF_VERSION 2.03   // Track modifications in the header
+#define LCONF_VERSION 3.00   // Track modifications in the header
 /*
 These change logs follow the convention below:
 **LCONF_VERSION
@@ -88,6 +88,9 @@ file.
 adaptation to future modbus upgrades.
 - Added FIO extended feature support.
 
+**3.00
+7/2017
+
 */
 
 #define TWOPI 6.283185307179586
@@ -107,6 +110,7 @@ adaptation to future modbus upgrades.
 #define LCONF_MAX_AOBUFFER  512     // Maximum number of buffered analog outputs
 #define LCONF_BACKLOG_THRESHOLD 1024 // raise a warning if the backlog exceeds this number.
 #define LCONF_CLOCK_MHZ 80.0    // Clock frequency in MHz
+#define LCONF_SAMPLES_PER_READ 64  // Data read/write block size
 
 // macros for writing lines to configuration files in WRITE_CONFIG()
 #define write_str(param,child) if(dconf[devnum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].child);}
@@ -185,7 +189,8 @@ typedef struct aoconf {
                                   // duty=1 results in all-high square and an all-rising triangle (sawtooth)
 } AOCONF;
 
-
+// Flexible Input/Output configuration struct
+// This includes everything needed to configure an extended feature FIO channel
 typedef struct fioconf {
     // Flexible IO mode enumerated type
     enum {  FIO_NONE,   // No extended features
@@ -231,12 +236,20 @@ typedef struct metaconf {
 } METACONF;
 
 
-typedef struct filestream {
-    FILE* file;                     // The open data file
-    double* buffer;                 // A buffer for reading in data
-    unsigned int samples_per_read;  // The size of the buffer
-} FILESTREAM;
-
+// Ring Buffer structure
+// The LCONF ring buffer supports reading and writing in R/W blocks that mimic
+// the T7 stream read block.  
+typedef struct ringbuffer {
+    unsigned int size_samples;      // length of the buffer array (NOT per channel)
+    unsigned int blocksize_samples; // size of each read/write block
+    unsigned int samples_per_read;  // samples per channel in each block
+    unsigned int samples_read;      // number of samples read since streaming began
+    unsigned int samples_streamed;  // number of samples streamed from the T7
+    unsigned int channels;          // channels in the stream
+    unsigned int read;              // beginning index of the next read block
+    unsigned int write;             // beginning index of the next write block
+    double* buffer;                 // the buffer array
+} RINGBUFFER;
 
 
 typedef struct devconf {
@@ -263,13 +276,13 @@ typedef struct devconf {
     // Trigger
     int trigchannel;                // Which channel should be used for the trigger?
     unsigned int trigpre;           // How many pre-trigger samples?
-    unsigned int trigpre_collected; // How many pre-trigger samples have been collected?
+    unsigned int trigmem;           // Persistent memory for the trigger
     double triglevel;               // What voltage should the trigger seek?
     enum {TRIG_RISING, TRIG_FALLING, TRIG_ALL} trigedge; // Trigger edge
     enum {TRIG_IDLE, TRIG_PRE, TRIG_ARMED, TRIG_ACTIVE} trigstate; // Trigger state
     // Meta & filestream
     METACONF meta[LCONF_MAX_META];  // *meta parameters
-    FILESTREAM FS;                  // active file stream?
+    RINGBUFFER RB;                  // ring buffer
 } DEVCONF;
 
 
@@ -690,36 +703,82 @@ it.
 */
 int update_fio(DEVCONF* dconf, const unsigned int devnum);
 
+/*STATUS_DATA_STREAM
+Report on a data stream's status
+CHANNELS - number of analog input channels streaming
+SAMPLES_PER_READ - number of samples per channel in each read/write block
+SAMPLES_STREAMED - a running total of the samples per channel streamed into the
+                    buffer from the T7
+SAMPLES_READ - a running total of the samples per channel read from the buffer.
+SAMPLES_WAITING - the number of samples waiting in the buffer
+
+To determine the total number of samples in a read/write block, calculate
+    CHANNELS * SAMPLES_PER_READ
+*/
+void status_data_stream(DEVCONF* dconf, const unsigned int devnum,
+        unsigned int *samples_streamed, unsigned int *samples_read,
+        unsigned int *samples_waiting);
+
+/*ISCOMPLETE_DATA_STREAM
+Returns 1 to indicate that at least dconf[devnum].nsample samples per channel
+have been streamed from the T7.  Returns a 0 otherwise.
+*/
+int iscomplete_data_stream(DEVCONF* dconf, const unsigned int devnum);
+
+/*ISEMPTY_DATA_STREAM
+Returns 1 to indicate that all data in the buffer has been read.  Returns a 0
+otherwise.
+*/
+int isempty_data_stream(DEVCONF* dconf, const unsigned int devnum);
+
 /*START_DATA_STREAM
 Start a stream operation based on the device configuration for device devnum.
 samples_per_read can be used to override the NSAMPLE parameter in the device
-configuration.  If samples_per_read is <= 0, then the NSAMPLE configuration 
+configuration.  If samples_per_read is <= 0, then the LCONF_SAMPLES_PER_READ
 value will be used instead.
 */
 int start_data_stream(DEVCONF* dconf, const unsigned int devnum,  // Device array and number
             int samples_per_read);    // how many samples per call to read_data_stream
 
-/*READ_DATA_STREAM
-Read in data from an active stream on device devnum.  This is little more than
-a wrapper for the LJM_eReadStream function.  Data from device devnum are read
-into the data array.
 
-The measurements of each scan are ordered in data[] by channel number.  When 
+/*SERVICE_DATA_STREAM
+Read data from an active stream on the device devnum.  The SERVICE_DATA_STREAM
+function also services the software trigger state.
+
+Data are read directly from the T7 into a ring buffer in the DEVCONF struct.  
+Until data become available, READ_DATA_STREAM will return NULL data arrays,
+but once valid data are ready, READ_DATA_STREAM returns pointers into this
+ring buffer.
+*/
+int service_data_stream(DEVCONF* dconf, const unsigned int devnum);
+
+/*READ_DATA_STREAM
+If data are available on the data stream on device number DEVNUM, then 
+READ_DATA_STREAM will return a DATA pointer into a buffer that contains data
+ready for use.  The amount of data available is indicated by the CHANNELS
+and SAMPLES_PER_READ integers.  The total length of the data array will be 
+CHANNELS * SAMPLES_PER_READ.
+
+The measurements of each scan are arranged in data[] by channel number.  When 
 three channels are included in each measurement, the data array would appear 
 something like this
-data[0]     scan0, channel0
-data[1]     scan0, channel1
-data[2]     scan0, channel2
-data[3]     scan1, channel0
-data[4]     scan1, channel1
-data[5]     scan1, channel2
+data[0]     sample0, channel0
+data[1]     sample0, channel1
+data[2]     sample0, channel2
+data[3]     sample1, channel0
+data[4]     sample1, channel1
+data[5]     sample1, channel2
 ... 
 
-The write_data() function disentangles these samples automatically and writes an
-ASCII file that can be loaded into Matlab, Excel, Python, or your analysis 
-software of choice.
+The SAMPLES_READ integer indicates a running total of the number of samples read
+per channel after each read operation.
+
+Once READ_DATA_STREAM has been called, the DEVCONF struct updates its internal
+pointers, and the next call's DATA register will either point to the next 
+available block of data, or it will be NULL if the buffer is empty.
 */
-int read_data_stream(DEVCONF* dconf, const unsigned int devnum, double *data);
+int read_data_stream(DEVCONF* dconf, const unsigned int devnum, 
+    double **data, unsigned int *channels, unsigned int *samples_per_read);
 
 /*STOP_STREAM
 Halt an active stream on device devnum.
@@ -732,43 +791,20 @@ int stop_data_stream(DEVCONF* dconf, const unsigned int devnum);
 .
 */
 
-/*CLEAN_FILE_STREAM
-This functions "cleans up" after a file streaming operation.  The file is closed
-the dynamic buffer memory is returned, and all parameters are forced to zero or
-NULL to indicate that the file stream is inactive.
-
-clean_file_stream() cannot fail, and so returns no error.
+/*INIT_DATA_FILE
+Writes the configuration header and timestamp to a data file.  This should
+be called prior to write_data_file()
 */
-void clean_file_stream(FILESTREAM* FS);
-
-/*START_FILE_STREAM
-This high-level operation calls on several other functions to:
-1) Open filename in create/overwrite mode
-2) Allocate a buffer array
-3) Write the device configuration as a header
-4) Start a data stream
-5) Write the date and time the stream was started to the data file
-
-The samples_per_read parameter can be used to override the NSAMPLE configuration
-parameter.  If samples_per_read is <= 0, then the NSAMPLE parameter will be used
-instead.
-*/
-int start_file_stream(DEVCONF* dconf, const unsigned int devnum,
-            int samples_per_read, const char *filename);
+int init_data_file(DEVCONF* dconf, const unsigned int devnum, FILE *FF);
 
 
 /*READ_FILE_STREAM
-Similar to read_data_stream(), this function actually calls its namesake to
-read data into the FS buffer.  read_file_stream() performs the additional
-task of formatting and printing data to the data file.
+Streams data from the dconf buffer to an open data file.  WRITE_DATA_FILE calls
+READ_DATA_STREAM to pull data from the device ring buffer.  The buffer will
+be empty unless there are also prior calls to SERVICE_DATA_STREAM.
 */
-int read_file_stream(DEVCONF* dconf, const unsigned int devnum);
+int write_data_file(DEVCONF* dconf, const unsigned int devnum, FILE *FF);
 
-/*STOP_FILE_STREAM
-1) Calls stop_data_stream() to halt the data acquisition process
-2) Calls clean_file_stream() to close the file and free the buffer.
-*/
-int stop_file_stream(DEVCONF* dconf, const unsigned int devnum);
 
 
 

@@ -7,7 +7,7 @@
 #include <time.h>       // for file stream time stamps
 #include <LabJackM.h>   // duh
 #include <stdint.h>     // being careful about bit widths
-
+#include <sys/sysinfo.h>    // for ram overload checking
 #include "lconfig.h"
 
 
@@ -127,13 +127,9 @@ void init_config(DEVCONF* dconf){
     dconf->trigchannel = -1;
     dconf->triglevel = 0.;
     dconf->trigpre = 0;
-    dconf->trigpre_collected = 0;
+    dconf->trigmem = 0;
     dconf->trigstate = TRIG_IDLE;
     dconf->trigedge = TRIG_RISING;
-    // Filestream
-    dconf->FS.buffer = NULL;
-    dconf->FS.file = NULL;
-    dconf->FS.samples_per_read = 0;
     // Metas
     for(metanum=0; metanum<LCONF_MAX_META; metanum++)
         dconf->meta[metanum].param[0] = '\0';
@@ -169,17 +165,118 @@ void init_config(DEVCONF* dconf){
         dconf->fioch[fionum].phase = 0.;
         dconf->fioch[fionum].counts = 0;
     }
+    dconf->RB.buffer=NULL;
 }
 
 
-void clean_file_stream(FILESTREAM* FS){
-    if(FS->file) fclose(FS->file); 
-    FS->file=NULL;
-    if(FS->buffer) free(FS->buffer);
-    FS->buffer = NULL;
-    FS->samples_per_read = 0;
+// Initialization declares the buffer memory and initializes all
+// internal variables to describe the buffer's size and read/write oeprations
+int init_buffer(RINGBUFFER* RB,    // Ring buffer struct to initialize
+                const unsigned int channels, // The number of channels in the stream
+                const unsigned int samples_per_read, // The samples (scans) per R/W block
+                const unsigned int blocks){ // The number of R/W blocks to buffer
+    
+    struct sysinfo sinf;
+    long unsigned int bytes;
+
+    if(RB->buffer){
+        fprintf(stderr,"RINGBUFFER: Buffer not free!\n");
+        return LCONF_ERROR;
+    }
+
+    RB->samples_per_read = samples_per_read;
+    RB->samples_read = 0;
+    RB->samples_streamed = 0;
+    RB->channels = channels;
+    RB->blocksize_samples = samples_per_read * channels;
+    RB->size_samples = RB->blocksize_samples * blocks;
+    RB->read = 0;
+    RB->write = 0;
+    // Do some sanity checking on the buffer size
+    sysinfo(&sinf);
+    bytes = RB->size_samples * sizeof(double);
+    if(sinf.freeram * 0.9 < bytes){
+        fprintf(stderr,"RINGBUFFER: Not enough available memory: aborting!\n");
+        RB->buffer = NULL;
+        return LCONF_ERROR;
+    }
+    RB->buffer = malloc(bytes);
+    return LCONF_NOERR;
 }
 
+int isempty_buffer(RINGBUFFER* RB){
+    return (RB->read == RB->write);
+}
+
+int isfull_buffer(RINGBUFFER* RB){
+    return (RB->read == RB->size_samples);
+}
+
+// Returns a pointer to the start of the next block to be written
+double* get_write_buffer(RINGBUFFER* RB){
+    if(RB->buffer == NULL)
+        return NULL;
+    return &RB->buffer[RB->write];
+}
+
+// Writing to the buffer is done externally by the LJM module, but after the
+// data is written, the buffer variables need to be advanced appropriately.
+void service_write_buffer(RINGBUFFER* RB){
+    // advance the write index
+    RB->write += RB->blocksize_samples;
+    RB->samples_streamed += RB->samples_per_read;
+    // Check for wrapping
+    if(RB->write + RB->blocksize_samples > RB->size_samples)
+        RB->write = 0;
+    // If the buffer was just filled
+    if(RB->write == RB->read)
+        RB->read = RB->size_samples;
+}
+
+// Returns a pointer to the start of the next block to be read
+// returns NULL if the buffer is empty
+double* get_read_buffer(RINGBUFFER* RB){
+    if(RB->buffer == NULL)
+        return NULL;
+    // if the buffer is full
+    if(RB->read == RB->size_samples)
+        return &RB->buffer[RB->write];
+    // if the buffer is empty
+    else if(RB->read == RB->write)
+        return NULL;
+    // Normal operation
+    else
+        return &RB->buffer[RB->read];
+}
+
+// Updates the buffer's read index once a read operation is complete.
+void service_read_buffer(RINGBUFFER *RB){
+    // if the buffer is full
+    if(RB->read == RB->size_samples)
+        RB->read = RB->write;
+    // If the buffer is empty
+    else if(RB->read == RB->write)
+        return;
+    RB->read += RB->blocksize_samples;
+    RB->samples_read += RB->samples_per_read;
+    // Check for wrapping
+    if(RB->read + RB->blocksize_samples > RB->size_samples)
+        RB->read = 0;
+}
+
+// Free the buffer's memory
+void clean_buffer(RINGBUFFER* RB){
+    if(RB->buffer){
+        free(RB->buffer);
+        RB->buffer = NULL;
+    }
+    RB->samples_per_read = 0;
+    RB->channels = 0;
+    RB->blocksize_samples = 0;
+    RB->size_samples = 0;
+    RB->read = 0;
+    RB->write = 0;
+}
 
 /*....................................
 .
@@ -592,6 +689,20 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
         //
+        // TRIGPRE parameter
+        //
+        }else if(streq(param,"trigpre")){
+            if(sscanf(value,"%d",&itemp)!=1){
+                fprintf(stderr,"LOAD: TRIGpre expected an integer pretrigger sample count but found: %s\n", 
+                    value);
+                goto lconf_loadfail;
+            }
+            if(itemp < 0){
+                fprintf(stderr,"LOAD: TRIGpre must be non-negative.\n");
+                goto lconf_loadfail;
+            }
+            dconf[devnum].trigpre = itemp;
+        //
         // FIOFREQUENCY parameter
         //
         }else if(streq(param,"fiofrequency")){
@@ -840,6 +951,19 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
         write_aoflt(aoduty,duty)
         fprintf(ff,"\n");
     }
+    // Trigger settings
+    if(dconf[devnum].trigchannel >= 0){
+        fprintf(ff,"# Trigger Settings\n");
+        write_int(trigchannel,trigchannel)
+        write_flt(triglevel,triglevel)
+        if(dconf[devnum].trigedge == TRIG_RISING)
+            fprintf(ff,"trigedge rising\n");
+        else if(dconf[devnum].trigedge == TRIG_FALLING)
+            fprintf(ff,"trigedge falling\n");
+        else
+            fprintf(ff,"trigedge all\n");
+        write_int(trigpre,trigpre);
+    }
 
     // FIO CHANNELS
     if(dconf[devnum].nfioch){
@@ -997,6 +1121,8 @@ int close_config(DEVCONF* dconf, const unsigned int devnum){
         LJM_ErrorToString(err, err_str);
         fprintf(stderr,"%s\n",err_str);
     }
+    // Clean up the buffer
+    clean_buffer(&dconf[devnum].RB);
     return err;
 }
 
@@ -1689,7 +1815,7 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
         */
         // Read the negative channel
         stemp[0] = '\0';
-        sprintf(stemp, "AI%d_NEGATIVE_CH", channel);
+        sprintf(stemp, "AIN%d_NEGATIVE_CH", channel);
         err = LJM_eReadName( handle, stemp, &ftemp);
         /* Depreciated - used the register address instead of name
         err = LJM_eReadAddress(  handle,
@@ -1698,14 +1824,14 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
                             &ftemp);
         */
         if(err){
-            fprintf(stderr,"DOWNLOAD: Failed to read the negative AI channel number at address\n");
+            fprintf(stderr,"DOWNLOAD: Failed to read the negative AI channel number\n");
             goto lconf_downloadfail;
         }
         out->aich[ainum].nchannel = (int) ftemp;
 
         // Read the range
         stemp[0] = '\0';
-        sprintf(stemp, "AI%d_RANGE", channel);
+        sprintf(stemp, "AIN%d_RANGE", channel);
         err = LJM_eReadName( handle, stemp, &ftemp);
         /* Depreciated -used the register address instead of the name
         err = LJM_eReadAddress( handle,
@@ -1714,14 +1840,14 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
                             &ftemp);
         */
         if(err){
-            fprintf(stderr,"DOWNLOAD: Failed to read the AI channel range at address\n");
+            fprintf(stderr,"DOWNLOAD: Failed to read the AI channel range\n");
             goto lconf_downloadfail;
         }
         out->aich[ainum].range = ftemp;
 
         // Read the resolution
         stemp[0] = '\0';
-        sprintf(stemp, "AI%d_RESOLUTION", channel);
+        sprintf(stemp, "AIN%d_RESOLUTION_INDEX", channel);
         err = LJM_eReadName( handle, stemp, &ftemp);
         /* Depreciated - used the register address instead of the name
         err = LJM_eReadAddress( handle,
@@ -1938,11 +2064,11 @@ void show_config(DEVCONF* dconf, const unsigned int devnum){
     print_color("Gateway", dconf[devnum].gateway, live.gateway);
     print_color("Subnet", dconf[devnum].subnet, live.subnet);
     sprintf(value1, "%.1f", dconf[devnum].samplehz);
-    print_color("Sample Rate(Hz):",value1,"?");
+    print_color("Sample Rate(Hz)",value1,"?");
     sprintf(value1, "%.1f", dconf[devnum].settleus);
-    print_color("Settling Time(us):",value1,"?");
+    print_color("Settling Time(us)",value1,"?");
     sprintf(value1, "%d", dconf[devnum].nsample);
-    print_color("Samples per Read:",value1,"?");
+    print_color("Samples",value1,"?");
     sprintf(value1, "%d", dconf[devnum].naich);
     sprintf(value2, "%d", live.naich);
     print_color("\nAnalog Input Channels", value1, value2);
@@ -2342,14 +2468,49 @@ int put_meta_str(DEVCONF* dconf, const unsigned int devnum, const char* param, c
 
 
 
+void status_data_stream(DEVCONF* dconf, const unsigned int devnum,
+        unsigned int *samples_streamed, unsigned int *samples_read,
+        unsigned int *samples_waiting){
+
+    if(dconf[devnum].RB.buffer){
+        *samples_streamed = dconf[devnum].RB.samples_streamed;
+        *samples_read = dconf[devnum].RB.samples_read;
+        // Case out the read and write status
+        if(dconf[devnum].RB.read == dconf[devnum].RB.size_samples)
+            *samples_waiting = dconf[devnum].RB.size_samples / dconf[devnum].RB.channels;
+        // If read has wrapped around the end of the buffer
+        else if(dconf[devnum].RB.write < dconf[devnum].RB.read)
+            *samples_waiting = (dconf[devnum].RB.size_samples -\
+                dconf[devnum].RB.read + dconf[devnum].RB.write)/\
+                dconf[devnum].RB.channels;
+        else
+            *samples_waiting = (dconf[devnum].RB.write-dconf[devnum].RB.read)/\
+                dconf[devnum].RB.channels;
+    }
+}
+
+
+
+int iscomplete_data_stream(DEVCONF* dconf, const unsigned int devnum){
+    return (dconf[devnum].RB.samples_streamed > dconf[devnum].nsample);
+}
+
+
+int isempty_data_stream(DEVCONF* dconf, const unsigned int devnum){
+    return isempty_buffer(&dconf[devnum].RB);
+}
+
+
 int start_data_stream(DEVCONF* dconf, const unsigned int devnum, int samples_per_read){
     int ainum,aonum,index,err;
     int stlist[LCONF_MAX_STCH];
     int resindex, reg_temp, dummy;
+    unsigned int blocks;
     char flag;
 
+    // If the application specifies samples, it overrides the configuration file.
     if(samples_per_read <= 0)
-        samples_per_read = dconf[devnum].nsample;
+        samples_per_read = LCONF_SAMPLES_PER_READ;
 
     if(dconf[devnum].naich<1 && dconf[devnum].naoch<1){
         fprintf(stderr,"STREAM_START: Cannot start a data stream with no channels on device %d.\n", devnum);
@@ -2401,12 +2562,34 @@ int start_data_stream(DEVCONF* dconf, const unsigned int devnum, int samples_per
         goto lconf_startfail;
     }
 
+    // Determine the number of R/W blocks in the buffer
+    blocks = dconf[devnum].trigpre > dconf[devnum].nsample ? 
+                dconf[devnum].trigpre : dconf[devnum].nsample;
+    blocks = (blocks/samples_per_read) + 1;
+
+    // Configure the ring buffer
+    // The number of buffer R/W blocks is calculated from the pretrigger
+    // buffer size plus 1.
+    if(init_buffer(&dconf[devnum].RB, 
+                dconf[devnum].naich,
+                samples_per_read,
+                blocks)){
+        fprintf(stderr,"STREAM_START: Failed to initialize the buffer.\n");
+        return LCONF_ERROR;
+    }
+
+    // Initialize the trigger
+    dconf[devnum].trigmem = 0;
+    if(dconf[devnum].trigchannel >= 0)
+        dconf[devnum].trigstate = TRIG_PRE;
+
     // Start the stream.
     err=LJM_eStreamStart(dconf[devnum].handle, 
             samples_per_read,
             dconf[devnum].naich+dconf[devnum].naoch,
             stlist,
             &dconf[devnum].samplehz);
+
     if(err){
         fprintf(stderr,"STREAM_START: Failed to start the stream.\n");
         goto lconf_startfail;
@@ -2421,11 +2604,18 @@ int start_data_stream(DEVCONF* dconf, const unsigned int devnum, int samples_per
 }
 
 
-int read_data_stream(DEVCONF* dconf, const unsigned int devnum, double *data){
-    int dev_backlog, ljm_backlog, err;
+int service_data_stream(DEVCONF* dconf, const unsigned int devnum){
+    int dev_backlog, ljm_backlog, size, err;
+    int index, this;
+    double *write_data;
 
-    err = LJM_eStreamRead(dconf[devnum].handle, data, &dev_backlog, &ljm_backlog);
-
+    // Retrieve the write buffer pointer
+    write_data = get_write_buffer(&dconf[devnum].RB);
+    // Perform the data transfer
+    err = LJM_eStreamRead(dconf[devnum].handle, 
+            write_data,
+            &dev_backlog, &ljm_backlog);
+    // Do some error checking
     if(dev_backlog > LCONF_BACKLOG_THRESHOLD)
         fprintf(stderr,"READ_STREAM: Device backlog! %d\n",dev_backlog);
     else if(ljm_backlog > LCONF_BACKLOG_THRESHOLD)
@@ -2437,14 +2627,90 @@ int read_data_stream(DEVCONF* dconf, const unsigned int devnum, double *data){
         fprintf(stderr,"%s\n",err_str);
         return LCONF_ERROR;
     }
+    // If there was no error, update the ringbuffer registers
+    service_write_buffer(&dconf[devnum].RB);
+
+    // Tend to the software trigger
+    if(dconf[devnum].trigstate == TRIG_PRE){
+        if(dconf[devnum].RB.samples_streamed >= dconf[devnum].trigpre)
+            dconf[devnum].trigstate = TRIG_ARMED;
+    }else if(dconf[devnum].trigstate == TRIG_ARMED){
+        // Test for a trigger event
+        size = dconf[devnum].RB.blocksize_samples;
+        // Case out the edge types in advance for speed
+        // Start with rising
+        if(dconf[devnum].trigedge == TRIG_RISING){
+            for(index = dconf[devnum].trigchannel;
+                    index < size; index += dconf[devnum].RB.channels){
+                if(write_data[index] > dconf[devnum].triglevel)
+                    this = 0b01;
+                else
+                    this = 0b10;
+                if(dconf[devnum].trigmem == this){
+                    dconf[devnum].trigstate = TRIG_ACTIVE;
+                    dconf[devnum].trigmem = 0x00;
+                    break;
+                }else
+                    dconf[devnum].trigmem = this>>1;
+            }
+        // Falling edge
+        }else if(dconf[devnum].trigedge == TRIG_FALLING){
+            for(index = dconf[devnum].trigchannel;
+                    index < size; index += dconf[devnum].RB.channels){
+                if(write_data[index] <= dconf[devnum].triglevel)
+                    this = 0b01;
+                else
+                    this = 0b10;
+                if(dconf[devnum].trigmem == this){
+                    dconf[devnum].trigstate = TRIG_ACTIVE;
+                    dconf[devnum].trigmem = 0x00;
+                    break;
+                }else
+                    dconf[devnum].trigmem = this>>1;
+            }
+        // Any edge
+        }else{
+            for(index = dconf[devnum].trigchannel;
+                    index < size; index += dconf[devnum].RB.channels){
+                if(write_data[index] > dconf[devnum].triglevel)
+                    this = 0b01;
+                else
+                    this = ~((unsigned int)0b01);
+                if(dconf[devnum].trigmem == this){
+                    dconf[devnum].trigstate = TRIG_ACTIVE;
+                    dconf[devnum].trigmem = 0x00;
+                    break;
+                }else
+                    dconf[devnum].trigmem = ~this;
+            }
+        }
+        // Unless a trigger was detected, throw away a sample block and reduce
+        // the record of samples streamed
+        if(dconf[devnum].trigstate == TRIG_ARMED){
+            service_read_buffer(&dconf[devnum].RB);
+            dconf[devnum].RB.samples_streamed -= dconf[devnum].RB.samples_per_read;
+        }
+    }
     return LCONF_NOERR;
+}
+
+
+int read_data_stream(DEVCONF* dconf, const unsigned int devnum,
+    double **data, unsigned int *channels, unsigned int *samples_per_read){
+    
+    (*data) = get_read_buffer(&dconf[devnum].RB);
+    service_read_buffer(&dconf[devnum].RB);
+    (*channels) = dconf[devnum].RB.channels;
+    (*samples_per_read) = dconf[devnum].RB.samples_per_read;
+    if(*data)
+        return LCONF_NOERR;
+    return LCONF_ERROR;
 }
 
 
 int stop_data_stream(DEVCONF* dconf, const unsigned int devnum){
     int err;
     err = LJM_eStreamStop(dconf[devnum].handle);
-
     if(err){
         fprintf(stderr,"LCONFIG: Error stopping a data stream on device %d.\n",devnum);
         LJM_ErrorToString(err, err_str);
@@ -2455,82 +2721,46 @@ int stop_data_stream(DEVCONF* dconf, const unsigned int devnum){
 }
 
 
+int clean_data_stream(DEVCONF* dconf, const unsigned int devnum){
+    clean_buffer(&dconf[devnum].RB);
+    return LCONF_NOERR;
+}
 
-int start_file_stream(DEVCONF* dconf, const unsigned int devnum, 
-            int samples_per_read, const char* filename){
+
+int init_data_file(DEVCONF* dconf, const unsigned int devnum, 
+            FILE* FF){
 
     unsigned int bytes;
     time_t now;
     int err;
-    FILESTREAM *FS;
-    FS = &dconf[devnum].FS;
-
-    if(samples_per_read <= 0)
-        samples_per_read = dconf[devnum].nsample;
-
-    if(FS->file){
-        fprintf(stderr,"FILE_STREAM: File is already open on device %d.\n",devnum);
-        return LCONF_ERROR;
-    }
-    FS->file = fopen(filename,"w+");
-    if(FS->file==NULL){
-        fprintf(stderr,"FILE_STREAM: Device %d failed to open file stream to file %s\n",devnum,filename);
-        return LCONF_ERROR;
-    }
-    // Initialize the buffer
-    FS->samples_per_read = samples_per_read;
-    bytes = dconf[devnum].naich * samples_per_read * sizeof(double);
-    FS->buffer = malloc(bytes);
-    if(FS->buffer==NULL){
-        fprintf(stderr,"FILE_STREAM: Failed to allocate %d bytes to buffer", bytes);
-        return LCONF_ERROR;
-    }
-
-    // From this point on, free needs to be called upon failure
-    // use clean_file_stream() when in doubt
 
     // Write the configuration header
-    write_config(dconf,devnum,FS->file);
-    // Start data collection
-    err = start_data_stream(dconf,devnum,samples_per_read);
+    write_config(dconf,devnum,FF);
     // Log the time
     time(&now);
-    fprintf(FS->file, "#: %s", ctime(&now));
+    fprintf(FF, "#: %s", ctime(&now));
 
-    if(err){
-        // The error will already have been printed by start_data_stream()
-        fprintf(stderr,"FILE_STREAM: Cleaning file stream.\n");
-        clean_file_stream(FS);
-        return LCONF_ERROR;
-    }
     return LCONF_NOERR;
 }
 
 
 
 
-int read_file_stream(DEVCONF* dconf, const unsigned int devnum){
+int write_data_file(DEVCONF* dconf, const unsigned int devnum, FILE* FF){
     int err,index,row,ainum;
-    FILESTREAM *FS;
-    FS = &dconf[devnum].FS;
+    unsigned int channels, samples_per_read;
+    double *data = NULL;
 
-    err = read_data_stream(dconf,devnum,FS->buffer);
-    index = 0;
-    // Write data one element at a time.
-    for(row=0; row<FS->samples_per_read; row++){
-        for(ainum=0; ainum<dconf[devnum].naich-1; ainum++)
-            fprintf(FS->file, "%.6e\t", FS->buffer[ index++ ]);
-        fprintf(FS->file, "%.6e\n", FS->buffer[ index++ ]);
+    err = read_data_stream(dconf,devnum,&data,&channels,&samples_per_read);
+    if(data){
+        index = 0;
+        // Write data one element at a time.
+        for(row=0; row<samples_per_read; row++){
+            for(ainum=0; ainum<channels-1; ainum++)
+                fprintf(FF, "%.6e\t", data[ index++ ]);
+            fprintf(FF, "%.6e\n", data[ index++ ]);
+        }
     }
-    return err;
-}
-
-
-int stop_file_stream(DEVCONF* dconf, const unsigned int devnum){
-    int err;
-
-    err = stop_data_stream(dconf,devnum);
-    clean_file_stream(&dconf[devnum].FS);
     return err;
 }
 

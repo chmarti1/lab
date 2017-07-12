@@ -5,7 +5,6 @@
 #include <stdlib.h>     // for malloc and free
 #include <stdio.h>      // duh
 #include <time.h>       // for file stream time stamps
-#include <sys/sysinfo.h>    // for ram overload checking
 
 #define DEF_CONFIGFILE  "dburst.conf"
 #define DEF_DATAFILE    "dburst.dat"
@@ -98,18 +97,14 @@ const char help_text[] = \
 . Main
 .....................*/
 int main(int argc, char *argv[]){
-    double *buffer;
-    int reads,  // number of packets to read
-        read_size,  // total number of samples for all channels in each packet
+    int nsample,    // number of samples to collect
         nich, // number of channels in the operation
         count, // a counter for loops
         col;    // column counter for data loop
-    long int buffer_bytes;  // requested buffer size in bytes
     double ftemp;
     int itemp;
     char stemp[MAXSTR], param[MAXSTR];
-    time_t now;
-    struct sysinfo sinf;
+    unsigned int samples_streamed, samples_read, samples_waiting;
     FILE *dfile;
     DEVCONF dconf[1];
 
@@ -166,44 +161,22 @@ int main(int argc, char *argv[]){
         }
     }
 
-    // Calculate the buffer size required
-    // If neither the sample nor duration option is configured
-    // Default to a single read operation
-    // First, store in buffer_size the number of samples to collect
-    if(samples_i < 0 && duration_i < 0){
-        reads = 1;
-        read_size = dconf[0].nsample * nich;
-    }else{
+    // Calculate the number of samples to collect
+    // If neither the sample nor duration option is configured, leave 
+    // configuration alone
+    if(samples_i > 0 || duration_i > 0){
         // Calculate the number of samples to collect
         // Use which ever is larger: samples_i or duration_i
-        reads = duration_i * dconf[0].samplehz / 1000;
-        reads = reads > samples_i ? reads : samples_i;
-        // Now, adjust the buffer_size to match an integer number of read operations
-        read_size = dconf[0].nsample * nich;
-        if(reads % dconf[0].nsample)
-            reads = (reads / dconf[0].nsample) + 1;
-        else
-            reads = (reads / dconf[0].nsample);
+        nsample = (duration_i * dconf[0].samplehz) / 1000;  // duration is in ms
+        nsample = nsample > samples_i ? nsample : samples_i;
+        dconf[0].nsample = nsample;
     }
-    buffer_bytes = ((long)reads)*((long)read_size)*sizeof(double);
 
     // Print some information
     printf("  Stream channels : %d\n", nich);
     printf("      Sample rate : %.1fHz\n", dconf[0].samplehz);
-    printf(" Samples per chan : %d (%d requested)\n", reads*dconf[0].nsample, samples_i);
-    ftemp = (double) buffer_bytes;
-    if(ftemp>1024){
-        ftemp/=1024;
-        if(ftemp>1024){
-            ftemp/=1024;
-            printf("      Buffer size : %dMiB\n", (int)ftemp);
-        }else
-            printf("      Buffer size : %dKiB\n", (int)ftemp);
-    }else
-        printf("      Buffer size : %dB\n", (int)ftemp);
-    printf("Samples per packet: %d\n", read_size);
-    printf("          Packets : %d\n", reads);
-    ftemp = reads*dconf[0].nsample/dconf[0].samplehz;
+    printf(" Samples per chan : %d (%d requested)\n", dconf[0].nsample, samples_i);
+    ftemp = dconf[0].nsample/dconf[0].samplehz;
     if(ftemp>60){
         ftemp /= 60;
         if(ftemp>60){
@@ -217,16 +190,6 @@ int main(int argc, char *argv[]){
     else
         printf("    Test duration : %fs (%s requested)\n", (float)(ftemp), duration);
 
-    // Check current RAM status
-    sysinfo(&sinf);
-    // If the requested memory is more than the system's memory, halt
-    if(sinf.totalram < buffer_bytes){
-        fprintf(stderr, "Total system memory is only %ld bytes\nAborting.\n", sinf.totalram);
-        return -1;
-    }else if(sinf.freeram*0.9 < buffer_bytes){
-        fprintf(stderr, "Only %ld bytes of memory free.\nAborting.\n", sinf.freeram);
-        return -1;
-    }
 
     printf("Setting up measurement...");
     fflush(stdout);
@@ -239,81 +202,67 @@ int main(int argc, char *argv[]){
         close_config(dconf,0);
         return -1;
     }
-
-    // Reserve the buffer and start the data collection
-    buffer = malloc(reads * read_size * sizeof(double));
-    if(buffer == NULL){
-        fprintf(stderr, "DBURST failed to allocate the buffer.\n");
-        close_config(dconf,0);
-        return -1;
-    }
     printf("DONE\n");
-
-    // Log the time
-    time(&now);
 
     // Start the data stream
     if(start_data_stream(dconf, 0, -1)){
         fprintf(stderr, "\nDBURST failed to start data collection.\n");
         close_config(dconf,0);
-        free(buffer);
         return -1;
     }
 
     // Stream data
-    printf("Streaming data.");
+    printf("Streaming data");
     fflush(stdout);
-    for(count=0; count<reads; count++){
-        if(read_data_stream(dconf, 0, &buffer[read_size*count])){
-            fprintf(stderr, "\nDBURST failed while trying to read the preliminary data!\n");
-            stop_file_stream(dconf,0);
-            close_config(dconf,0);
-            free(buffer);
-            return -1;
-        }
-        printf("%d.",count);
-        fflush(stdout);
-    }
+    if(dconf[0].trigstate == TRIG_PRE)
+        printf("\nWaiting for trigger\n");
 
+    while(!iscomplete_data_stream(dconf,0)){
+        if(service_data_stream(dconf, 0)){
+            fprintf(stderr, "\nDBURST failed while servicing the T7 connection!\n");
+            stop_data_stream(dconf,0);
+            close_config(dconf,0);
+            return -1;            
+        }
+
+        if(dconf[0].trigstate == TRIG_IDLE || dconf[0].trigstate == TRIG_ACTIVE){
+            printf(".");
+            fflush(stdout);
+        }
+    }
     // Halt data collection
-    if(stop_file_stream(dconf, 0)){
+    if(stop_data_stream(dconf, 0)){
         fprintf(stderr, "\nDBURST failed to halt preliminary data collection!\n");
         close_config(dconf,0);
-        free(buffer);
         return -1;
     }
-    close_config(dconf,0);
     printf("DONE\n");
 
     // Open the output file
-    printf("Writing the data file...");
+    printf("Writing the data file");
     fflush(stdout);
     dfile = fopen(data_file,"w");
     if(dfile == NULL){
-        free(buffer);
         printf("FAILED\n");
         fprintf(stderr, "DBURST failed to open the data file \"%s\"\n", data_file);
         return -1;
     }
 
     // Write the configuration header
-    write_config(dconf,0,dfile);
-    // Write the time data colleciton started
-    fprintf(dfile, "#: %s", ctime(&now));
+    init_data_file(dconf,0,dfile);
     // Write the samples
-    count = 0;
-    while(count<reads*read_size){
-        for(col=0; col<nich-1; col++){
-            fprintf(dfile, "%.6e ",buffer[count]);
-            count++;
-        }
-        fprintf(dfile, "%.6e\n",buffer[count]);
-        count++;
+    while(!isempty_data_stream(dconf,0)){
+        write_data_file(dconf,0,dfile);
+        //printf(".");
+        //fflush(stdout);
+        status_data_stream(dconf,0,&samples_streamed, &samples_read, &samples_waiting);
+        printf(".");
+        fflush(stdout);
     }
     fclose(dfile);
+    close_config(dconf,0);
     printf("DONE\n");
 
-    free(buffer);
     printf("Exited successfully.\n");
     return 0;
 }

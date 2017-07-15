@@ -2,18 +2,18 @@
 .
 .   Tools for loading laboratory configuration files
 .
-.   (c) 2016
+.   (c) 2017
 .   Released under GPLv3.0
 .   Chris Martin
 .   Assistant Professor of Mechanical Engineering
 .   Penn State University, Altoona College
 .
-.   Tested on the Linux kernal 3.19.0
-.   Linux Mint 17.3 Rosa
+.   Tested on the Linux kernal 4.4.0
+.   Linux Mint 18.1
 .   LJ Exoderiver v2.5.3
-.   LJM Library 1.13
+.   LJM Library 1.14.4
+.   LibLabjackUSB 2.6.0
 .   T7 Firmware 1.0188
-.   LibUSB 2:0.1.12
 .
 */
 
@@ -90,6 +90,15 @@ adaptation to future modbus upgrades.
 
 **3.00
 7/2017
+- Reorganized the data streaming system: transitioned away from parallel file
+and data streaming.  Implemented the start, service, read, and stop_data_stream 
+with init_data_file() and write_data_file() utilities.
+- Implemented a ring buffer for automatic streaming.
+- Added a software trigger.
+
+**3.01
+7/2017
+- Added the HSC (high speed counter) digital trigger option
 
 */
 
@@ -111,6 +120,7 @@ adaptation to future modbus upgrades.
 #define LCONF_BACKLOG_THRESHOLD 1024 // raise a warning if the backlog exceeds this number.
 #define LCONF_CLOCK_MHZ 80.0    // Clock frequency in MHz
 #define LCONF_SAMPLES_PER_READ 64  // Data read/write block size
+#define LCONF_TRIG_HSC 3000
 
 // macros for writing lines to configuration files in WRITE_CONFIG()
 #define write_str(param,child) if(dconf[devnum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].child);}
@@ -450,6 +460,10 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   specifies which of the analog measurements should be monitored for a 
 .   trigger.
 .
+.   For fast digital pulses, LCONFIG can be configured to watch the high speed
+.   counter 2 by passing "HSC" instead of a trigger channel.  If the value in 
+.   the counter increases, then a trigger event will be registered.
+.
 .   The read_data_stream() function is responsible for monitoring the number of
 .   samples and looking for a trigger.  There are four trigger states indicated
 .   by the TRIGSTATE member of the DEVCONF structure.
@@ -480,7 +494,8 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   one for each channel.
 -FIOCHANNEL
 .   Like the AOCHANNEL and AICHANNEL, this determines which of the FIO channels
-.   is being set.
+.   is being set.  Valid values are 0-7, but some features are not implemented
+.   on all FIO channels.  Check the T7 manual Digital IO section for details.
 -FIOSIGNAL
 .   Sets the signal type used for this channel.  The following is a list of the
 .   supported signal types and how their settings are handled.  Measurements

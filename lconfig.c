@@ -655,7 +655,9 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
         // TRIGCHANNEL parameter
         //
         }else if(streq(param,"trigchannel")){
-            if(sscanf(value,"%d",&itemp)!=1){
+            if(streq(value,"hsc")){
+                itemp = LCONF_TRIG_HSC;
+            }else if(sscanf(value,"%d",&itemp)!=1){
                 fprintf(stderr,"LOAD: TRIGchannel expected an integer channel number but found: %s\n", 
                     value);
                 goto lconf_loadfail;
@@ -954,7 +956,10 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
     // Trigger settings
     if(dconf[devnum].trigchannel >= 0){
         fprintf(ff,"# Trigger Settings\n");
-        write_int(trigchannel,trigchannel)
+        if(dconf[devnum].trigchannel == LCONF_TRIG_HSC)
+            fprintf(ff,"trigchannel hsc\n");
+        else
+            write_int(trigchannel,trigchannel)
         write_flt(triglevel,triglevel)
         if(dconf[devnum].trigedge == TRIG_RISING)
             fprintf(ff,"trigedge rising\n");
@@ -1438,6 +1443,17 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
         if(err){
             fprintf(stderr,"UPLOAD: Failed to write 1 to STREAM_OUT%d_SET_LOOP\n", 
                     aonum);
+            goto lconf_uploadfail;
+        }
+    }
+
+    // Check for an HSC trigger setting
+    if(dconf[devnum].trigchannel == LCONF_TRIG_HSC){
+        err = LJM_eWriteName( handle, "DIO18_EF_ENABLE", 0);
+        err = err ? err : LJM_eWriteName( handle, "DIO18_EF_INDEX", 7);
+        err = err ? err : LJM_eWriteName( handle, "DIO18_EF_ENABLE", 1);
+        if(err){
+            fprintf(stderr,"UPLOAD: Failed to configure high speed counter 2 for the HSC trigger.\n");
             goto lconf_uploadfail;
         }
     }
@@ -2607,6 +2623,8 @@ int start_data_stream(DEVCONF* dconf, const unsigned int devnum, int samples_per
 int service_data_stream(DEVCONF* dconf, const unsigned int devnum){
     int dev_backlog, ljm_backlog, size, err;
     int index, this;
+    unsigned int itemp;
+    double ftemp;
     double *write_data;
 
     // Retrieve the write buffer pointer
@@ -2634,12 +2652,32 @@ int service_data_stream(DEVCONF* dconf, const unsigned int devnum){
     if(dconf[devnum].trigstate == TRIG_PRE){
         if(dconf[devnum].RB.samples_streamed >= dconf[devnum].trigpre)
             dconf[devnum].trigstate = TRIG_ARMED;
+            if(dconf[devnum].trigchannel == LCONF_TRIG_HSC){
+                err = LJM_eReadName(dconf[devnum].handle, "DIO18_EF_READ_A", &ftemp);
+                if(err){
+                    fprintf(stderr,"SERVICE DATA STREAM: Failed to test the high speed counter.\n");
+                    dconf[devnum].trigmem = 0x00;
+                    return LCONF_ERROR;
+                }
+                dconf[devnum].trigmem = (unsigned int) ftemp;
+            }
     }else if(dconf[devnum].trigstate == TRIG_ARMED){
         // Test for a trigger event
         size = dconf[devnum].RB.blocksize_samples;
         // Case out the edge types in advance for speed
-        // Start with rising
-        if(dconf[devnum].trigedge == TRIG_RISING){
+        // test for a counter event
+        if(dconf[devnum].trigchannel == LCONF_TRIG_HSC){
+            err = LJM_eReadName(dconf[devnum].handle, "DIO18_EF_READ_A", &ftemp);
+            if(err){
+                fprintf(stderr,"SERVICE DATA STREAM: Failed to test the high speed counter.\n");
+                dconf[devnum].trigmem = 0x00;
+                return LCONF_ERROR;
+            }else if(ftemp > dconf[devnum].trigmem){
+                dconf[devnum].trigstate = TRIG_ACTIVE;
+                dconf[devnum].trigmem = 0x00;
+            }
+        // Test for a rising edge
+        }else if(dconf[devnum].trigedge == TRIG_RISING){
             for(index = dconf[devnum].trigchannel;
                     index < size; index += dconf[devnum].RB.channels){
                 if(write_data[index] > dconf[devnum].triglevel)

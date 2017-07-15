@@ -23,7 +23,7 @@ experiment.  I love my LabJack, and the folks at LabJack do a great job of docum
 
 This little **L**aboratory **CONFIG**uration system reads and writes configuration files and automatically writes a header with the current configuration in each data file.  LCONFIG connects to and configures the T7 to perform analog input and output streaming, and automatically configures the flexible digital IO extended features.  
 
-###Features
+### Features
 LCONFIG allows automatic configuration and control of most of the T7's advanced features.
 
 - Stream sample rate configuration

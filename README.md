@@ -312,6 +312,7 @@ This structure contains all of the information needed to configure a device.  Th
 |clean_data_stream| Frees the buffer memory
 |init_file_stream | Writes a header to a data file
 |write_file_stream | Calls read_data_stream and writes formatted data to a data file
+|
 |update_fio | Update all flexible I/O measurements and output parameters in the FIOCONF structs
 | [**Meta Configuration**](#fun:meta) ||
 | get_meta_int, get_meta_flt, get_meta_str | Returns a meta parameter integer, floating point, or string value.  
@@ -543,6 +544,8 @@ These are the compiler constants provided by `lconfig.h`.
 | LCONF_NOERR | 0 | Value returned on successful exit
 | LCONF_ERROR | 1 | Value returned on unsuccessful exit
 
+## Future Improvements
+Analog input software triggering is on its way.  This is a technique for streaming continuously until a trigger event is observed in software.  Well implemented software triggers allow for generous pre-trigger buffering, so data before and after the trigger can be recorded.
 
 ## Known Bugs
 No persisting known bugs.

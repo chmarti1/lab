@@ -6,6 +6,7 @@ import numpy as np
 
 __version__ = '3.01'
 
+
 #define LCONF_MAX_STR 32
 #define LCONF_MAX_READ "%32s"
 #define LCONF_MAX_META 16
@@ -59,6 +60,10 @@ class AOCONF:
         self.duty = LCONF_DEFAULTS['LCONF_DEF_AO_DUTY']
         self.label = ''
 
+class FIOCONF:
+    def __init__(self):
+        
+
 class DEVCONF:
     def __init__(self):
         self.connection = -1
@@ -68,198 +73,217 @@ class DEVCONF:
         self.subnet = ''
         self.naich = 0
         self.naoch = 0
+        self.nfioch = 0
         self.samplehz = -1
-        self.nsample = 64;
-        self.settleus = 1.;
+        self.nsample = 64
+        self.settleus = 1.
+        self.trigchannel = -1
+        self.triglevel = 0.
+        self.trigpre = 0
+        self.trigedge = 'rising'
         self.aich = []
         self.aoch = []
+        self.fioch = []
         self.meta = {}
 
 
-def read_pair(ff):
-    """Read in a single parameter word
-    param, value = read_pair(ff)
+
+# Configuration file class
+class cfile(DEVCONF):
+    """ CFILE: ConfigurationFILE class
+    cfile( filename )
+
+Creates a configuration file object with members
+config      A list of DEVCONF objects describing the device configurations
+filename    The full path to the configuration file
 """
-    ws = ' \t\n\r'
-    nl = '\n'
-    comment = '#'
-    charin = '!'
-    param = ''
-    # so long as the file is not empty, keep reading
-    while charin:
-        word = ''
-        
-        # Kill off leading whitespace
-        charin = ff.read(1)
-        while charin and charin in ws:
-            charin = ff.read(1)
-            
-        # Read in a word
-        while charin and charin not in ws:
-            word += charin
-            charin = ff.read(1)
-        
-        # If the word is non-empty
-        if word:
-            # If the word starts with the termination characters
-            if word.startswith('##'):
-                ff.readline()
-                return '', ''
-            # If we've found a comment
-            elif word.startswith('#'):
-                # Kill off the line
-                ff.readline()
-            elif param:
-                return param,word
-            else:
-                param = word
-    return param,word
-                
+    def __init__(self, filename):
+        self.config = []
+        self.filename = os.path.abspath(filename)
 
+        with open(filename,'r') as ff:
+            # These dicitonaries are maps from the config file parameter name and
+            #   the class member name.  They are grouped by data type.
+            # Global integer map, global float map, and global string map
+            GIM = {'nsample':'nsample', 'trigchannel','trigchannel', 'trigpre':'trigpre'}
+            GFM = {'samplehz':'samplehz', 'settleus':'settleus', 'triglevel':'triglevel'}
+            GSM = {'ip':'ip', 'serial':'serial', 'gateway':'gateway', 'subnet':'subnet', 'trigedge':'trigedge'}
+            # Analog input integer map, analog input float map, analog input string map
+            AIIM = {'airesolution':'resolution'}
+            AIFM = {'airange':'range'}
+            AISM = {}
+            # Analog output integer, float, and string map
+            AOIM = {}
+            AOFM = {'aoamplitude':'amplitude', 'aofrequency':'frequency', 
+                    'aooffset':'offset', 'aoduty':'duty'}
+            AOSM = {'aosignal':'signal'}
+            # FLEXIBLE IO integer, float, and string maps
+            FIOIM = {}
+            FIOFM = {'fiotime':'time', 'fioduty':'duty', 'fiophase':'phase'}
+            FIOSM = {'fiosignal':'signal','fioedge':'edge','fiodebounce':'debounce'}
 
-
-
-def load_config(filename):
-    """Load a configuraiton file
-    conf = load_config(filename)
-        OR
-    conf = load_config(ff)
-
-load_config accepts a file name or an open file.  filename should be a 
-string path to a valid configuration file.  ff should be a file object
-referencing an open file stream to a valid configuration file.
-
-conf will be a list of DEVCONF objects corresponding to the devices 
-configured in the file.
-"""
-
-    opened = True
-    if not isinstance(filename,file):
-        ff = open(filename,'r')
-        opened = True
-    else:
-        ff = filename
-        opened = False
-
-    # These dicitonaries are maps from the config file parameter name and
-    #   the class member name.  They are grouped by data type.
-    # Global integer map, global float map, and global string map
-    GIM = {'nsample':'nsample'}
-    GFM = {'samplehz':'samplehz', 'settleus':'settleus'}
-    GSM = {'ip':'ip', 'serial':'serial', 'gateway':'gateway', 'subnet':'subnet'}
-    # Analog input integer map, analog input float map, analog input string map
-    AIIM = {'airesolution':'resolution'}
-    AIFM = {'airange':'range'}
-    AISM = {}
-    # Analog output integer, float, and string map
-    AOIM = {}
-    AOFM = {'aoamplitude':'amplitude', 'aofrequency':'frequency', 
-            'aooffset':'offset', 'aoduty':'duty'}
-    AOSM = {'aosignal':'signal'}
-    
-    done = []
-    this = None
-    thisai = None
-    thisao = None
-    
-    # Read in the new
-    param,value = read_pair(ff)
-    param = param.lower()
-    value = value.lower()
-
-    # Initialize the meta type
-    metatype = 'n'
-
-    while param and value:
-        
-        # Terminatino characters
-        if param == 'connection':
-            this = DEVCONF()
-            done.append(this)
-            try:
-                index = int(value)
-                this.connection = LCONF_CONNECTIONS[index]
-            except:
-                this.connection = value
-                # if this is not an integer
-                if value not in LCONF_CONNECTIONS:
-                    raise Exception('Unrecognized connection specifier: {:s}'.format(value))
+            done = []
+            this = None
             thisai = None
             thisao = None
-        elif not this:
-            raise Exception('Missing CONNECTION parameter.')
-        # Global parameters
-        elif param in GSM:
-            this.__dict__[GSM[param]] = value
-        elif param in GIM:
-            this.__dict__[GIM[param]] = int(value)
-        elif param in GFM:
-            this.__dict__[GFM[param]] = float(value)
-        # New analog input channel
-        elif param == 'aichannel':
-            thisai = AICONF()
-            this.aich.append(thisai)
-            thisai.channel = int(value)
-            this.naich += 1
-        elif param == 'ainegative':
-            if value=='ground':
-                index = 199
-            else:
-                index = int(value)
-            this.nchannel = index
-        # Analog input parameters
-        elif param in AIIM:
-            thisai.__dict__[AIIM[param]] = int(value)
-        elif param in AIFM:
-            thisai.__dict__[AIFM[param]] = float(value)
-        elif param in AISM:
-            thisai.__dict__[AISM[param]] = value
-        # New analog output channel
-        elif param == 'aochannel':
-            thisao = AOCONF()
-            this.aoch.append(thisao)
-            thisao.channel = int(value)
-            this.naoch += 1
-        elif param in AOIM:
-            thisao.__dict__[AOIM[param]] = int(value)
-        elif param in AOFM:
-            thisao.__dict__[AOFM[param]] = float(value)
-        elif param in AOSM:
-            thisao.__dict__[AOSM[param]] = value
-        elif param == 'meta':
-            if value == 'str' or value == 'string':
-                metatype = 's'
-            elif value == 'int' or value == 'integer':
-                metatype = 'i'
-            elif value == 'flt' or value == 'float':
-                metatype = 'f'
-            elif value == 'none' or value == 'end' or value == 'stop':
-                metatype = 'n'
-            else:
-                raise Exception('Unrecognized meta flag {:s}.'.format(param))
-        elif param.startswith('int:'):
-            this.meta[param[4:]] = int(value)
-        elif param.startswith('flt:'):
-            this.meta[param[4:]] = float(value)
-        elif param.startswith('str:'):
-            this.meta[param[4:]] = value
-        elif metatype == 'i':
-            this.meta[param] = int(value)
-        elif metatype == 'f':
-            this.meta[param] = float(value)
-        elif metatype == 's':
-            this.meta[param] = value
-        else:
-            raise Exception('Unrecognized parameter: {:s}.'.format(param))
-        
-        param,value = read_pair(ff)
-        param = param.lower()
-        value = value.lower()
+            thisfio = None
+            
+            # start the parse
+            # Read in the new
+            param,value = self._read_pair(ff)
+            param = param.lower()
+            value = value.lower()
 
-    if opened:
-        ff.close()
-        
-    return done
+            # Initialize the meta type
+            metatype = 'n'
+
+            while param and value:
+                
+                # Terminatino characters
+                if param == 'connection':
+                    this = DEVCONF()
+                    self.config.append(this)
+                    try:
+                        index = int(value)
+                        this.connection = LCONF_CONNECTIONS[index]
+                    except:
+                        this.connection = value
+                        # if this is not an integer
+                        if value not in LCONF_CONNECTIONS:
+                            raise Exception('Unrecognized connection specifier: {:s}'.format(value))
+                    thisai = None
+                    thisao = None
+                elif not this:
+                    raise Exception('Missing CONNECTION parameter.')
+                # Global parameters
+                elif param in GSM:
+                    this.__dict__[GSM[param]] = value
+                elif param in GIM:
+                    this.__dict__[GIM[param]] = int(value)
+                elif param in GFM:
+                    this.__dict__[GFM[param]] = float(value)
+                # New analog input channel
+                elif param == 'aichannel':
+                    thisai = AICONF()
+                    this.aich.append(thisai)
+                    thisai.channel = int(value)
+                    this.naich += 1
+                elif param == 'ainegative':
+                    if value=='ground':
+                        index = 199
+                    else:
+                        index = int(value)
+                    this.nchannel = index
+                # Analog input parameters
+                elif param in AIIM:
+                    thisai.__dict__[AIIM[param]] = int(value)
+                elif param in AIFM:
+                    thisai.__dict__[AIFM[param]] = float(value)
+                elif param in AISM:
+                    thisai.__dict__[AISM[param]] = value
+                # New analog output channel
+                elif param == 'aochannel':
+                    thisao = AOCONF()
+                    this.aoch.append(thisao)
+                    thisao.channel = int(value)
+                    this.naoch += 1
+                elif param in AOIM:
+                    thisao.__dict__[AOIM[param]] = int(value)
+                elif param in AOFM:
+                    thisao.__dict__[AOFM[param]] = float(value)
+                elif param in AOSM:
+                    thisao.__dict__[AOSM[param]] = value
+                # New flexible input/output channel
+                elif param == 'fiochannel':
+                    thisfio = FIOCONF()
+                    this.fioch.append(thisfio)
+                    thisfio.channel = int(value)
+                    this.nfioch += 1
+                # FIO parameters
+                elif param in AOIM:
+                    thisfio.__dict__[FIOIM[param]] = int(value)
+                elif param in AOFM:
+                    thisfio.__dict__[FIOFM[param]] = float(value)
+                elif param in AOSM:
+                    thisfio.__dict__[FIOSM[param]] = value
+                # New meta parameter
+                elif param == 'meta':
+                    if value == 'str' or value == 'string':
+                        metatype = 's'
+                    elif value == 'int' or value == 'integer':
+                        metatype = 'i'
+                    elif value == 'flt' or value == 'float':
+                        metatype = 'f'
+                    elif value == 'none' or value == 'end' or value == 'stop':
+                        metatype = 'n'
+                    else:
+                        raise Exception('Unrecognized meta flag {:s}.'.format(param))
+                elif param.startswith('int:'):
+                    this.meta[param[4:]] = int(value)
+                elif param.startswith('flt:'):
+                    this.meta[param[4:]] = float(value)
+                elif param.startswith('str:'):
+                    this.meta[param[4:]] = value
+                elif metatype == 'i':
+                    this.meta[param] = int(value)
+                elif metatype == 'f':
+                    this.meta[param] = float(value)
+                elif metatype == 's':
+                    this.meta[param] = value
+                else:
+                    raise Exception('Unrecognized parameter: {:s}.'.format(param))
+                
+                param,value = self._read_pair(ff)
+                param = param.lower()
+                value = value.lower()
+
+
+    def __len__(self):
+        return len(self.config)
+
+    def __getitem__(self,item):
+        return self.config[item]
+
+    def _read_pair(self,ff):
+        """Read in a single parameter word
+    param, value = read_pair(ff)
+"""
+        ws = ' \t\n\r'
+        nl = '\n'
+        comment = '#'
+        charin = '!'
+        param = ''
+        # so long as the file is not empty, keep reading
+        while charin:
+            word = ''
+            
+            # Kill off leading whitespace
+            charin = ff.read(1)
+            while charin and charin in ws:
+                charin = ff.read(1)
+                
+            # Read in a word
+            while charin and charin not in ws:
+                word += charin
+                charin = ff.read(1)
+            
+            # If the word is non-empty
+            if word:
+                # If the word starts with the termination characters
+                if word.startswith('##'):
+                    ff.readline()
+                    return '', ''
+                # If we've found a comment
+                elif word.startswith('#'):
+                    # Kill off the line
+                    ff.readline()
+                elif param:
+                    return param,word
+                else:
+                    param = word
+        return param,word
+
+
 
 
 def default_afun(fileobj):
@@ -272,17 +296,18 @@ def default_afun(fileobj):
     return out
 
 
-class dfile:
+
+class dfile(cfile):
     """LCONFIG data file object
     Has attributes:
 filename    The full path file name of the data file
-config      A DEVCONF object containing the read header device configuration
+config      A list of DEVCONF objects containing the device configurations
 start       A dictionary holding the start time for the experiment
 data        A 2D numpy array containing the raw data from the file
 analysis    A dictionary containing meta data reflecting data analysis
 afun        The function used to generate the analysis dictionary
 
-DFILE = dfile(filename, afun=None)
+DFILE = dfile(filename, afun=default_afun)
 
 filename is the full or partial path to the data file to be loaded.  It must
 conform to the lconfig format.
@@ -292,23 +317,26 @@ produce meta-analysis parameters on the data.  It must operate with the call
 signature
 >>> DFILE.analysis = afun(DFILE)
 """
-    def __init__(self,filename,afun=None):
-        self.filename = os.path.abspath(filename)
-        self.config = None
+    def __init__(self,filename,afun=default_afun):
+        # Load the configuration parameters
+        cfile.__init__(self,filename)
+
+        # Create some new parameters for the data file
         self.start = {'raw':'', 'day':-1, 'month':-1, 'year':-1, 'weekday':-1,
                 'hour':-1, 'minute':-1, 'second':-1}
         self.data = None
         self.analysis = None
         self.afun = afun
-    
-        try:
-            ff = open(filename,'r')
-        except:
-            raise Exception('Failed to open the data file: {:s}'.format(filename))
-        # load the configuration data
-        self.config = load_config(ff)
-
         data = []
+
+    
+        # Throw away the configuration data (already loaded)
+        with open(filename,'r') as ff:
+            param,value = self._read_pair(ff)
+            while param and value:
+                param,value = self._read_pair(ff)
+
+        # Start parsing data
         line = ff.readline()
         while line:
             if line.startswith('#:'):
@@ -345,6 +373,9 @@ signature
             except:
                 print "Exception encounterd while executing the analysis function"
                 print sys.exc_info()[1]
+
+
+
 
 class collection:
     """COLLECTION of dfile objects
@@ -388,7 +419,7 @@ simply reverse the values so that the larger is listed first.
 >>> C25 = C(voltage=(2.6,2.4))
 """
 
-    def __init__(self, afun=None):
+    def __init__(self, afun=default_afun):
         self.data = []
         self.afun = afun
         self._record = {}

@@ -122,21 +122,7 @@ with init_data_file() and write_data_file() utilities.
 #define LCONF_SAMPLES_PER_READ 64  // Data read/write block size
 #define LCONF_TRIG_HSC 3000
 
-// macros for writing lines to configuration files in WRITE_CONFIG()
-#define write_str(param,child) if(dconf[devnum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].child);}
-#define write_int(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].child);
-#define write_flt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].child);
-#define write_aistr(param,child) if(dconf[devnum].aich[ainum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].aich[ainum].child);}
-#define write_aiint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].aich[ainum].child);
-#define write_aiflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].aich[ainum].child);
-#define write_aostr(param,child) if(dconf[devnum].aoch[aonum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].aoch[aonum].child);}
-#define write_aoint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].aoch[aonum].child);
-#define write_aoflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].aoch[aonum].child);
-#define write_fiostr(param,child) if(dconf[devnum].fioch[fionum].child[0]!='\0'){fprintf(ff, "%s %s\n", #param, dconf[devnum].fioch[fionum].child);}
-#define write_fioint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].fioch[fionum].child);
-#define write_fioflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].fioch[fionum].child);
-// macro for testing strings
-#define streq(a,b) strncmp(a,b,LCONF_MAX_STR)==0
+
 
 #define LCONF_COLOR_RED "\x1b[31m"
 #define LCONF_COLOR_GREEN "\x1b[32m"
@@ -181,6 +167,10 @@ typedef struct aiconf {
     unsigned int    nchannel;    // negative channel number (0-13 or 199)
     double          range;       // bipolar input range (0.01, 0.1, 1.0, or 10.)
     unsigned int    resolution;  // resolution index (0-8) see T7 docs
+    double          calslope;   // calibration slope
+    double          caloffset;  // calibration offset
+    char            calunits[LCONF_MAX_STR];   // calibration units
+    char            label[LCONF_MAX_STR];   // channel label
 } AICONF;
 //  The calibration and zero parameters are used by the aical function
 
@@ -197,6 +187,7 @@ typedef struct aoconf {
     double          offset;       // What is the mean value?
     double          duty;         // Duty cycle for a square wave or triangle wave
                                   // duty=1 results in all-high square and an all-rising triangle (sawtooth)
+    char            label[LCONF_MAX_STR];   // Output channel label
 } AOCONF;
 
 // Flexible Input/Output configuration struct
@@ -228,6 +219,7 @@ typedef struct fioconf {
     double duty;        // PWM duty cycle (0-1)
     double phase;       // Phase parameters (degrees)
     unsigned int counts; // Pulse count
+    char label[LCONF_MAX_STR];
 } FIOCONF;
 
 // The METACONF is a struct for user-defined flexible parameters.

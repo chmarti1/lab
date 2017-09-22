@@ -11,6 +11,23 @@
 #include "lconfig.h"
 
 
+// macros for writing lines to configuration files in WRITE_CONFIG()
+#define write_str(param,child) dconf[devnum].child[0]!='\0' ? fprintf(ff, "%s %s\n", #param, dconf[devnum].child) : (int) 0
+#define write_int(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].child)
+#define write_flt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].child)
+#define write_aistr(param,child) dconf[devnum].aich[ainum].child[0]!='\0' ? fprintf(ff, "%s %s\n", #param, dconf[devnum].aich[ainum].child) : (int) 0
+#define write_aiint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].aich[ainum].child)
+#define write_aiflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].aich[ainum].child)
+#define write_aostr(param,child) dconf[devnum].aoch[aonum].child[0]!='\0' ? fprintf(ff, "%s %s\n", #param, dconf[devnum].aoch[aonum].child) : (int) 0
+#define write_aoint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].aoch[aonum].child)
+#define write_aoflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].aoch[aonum].child)
+#define write_fiostr(param,child) dconf[devnum].fioch[fionum].child[0]!='\0' ? fprintf(ff, "%s %s\n", #param, dconf[devnum].fioch[fionum].child) : (int) 0
+#define write_fioint(param,child) fprintf(ff, "%s %d\n", #param, dconf[devnum].fioch[fionum].child)
+#define write_fioflt(param,child) fprintf(ff, "%s %f\n", #param, dconf[devnum].fioch[fionum].child)
+// macro for testing strings
+#define streq(a,b) strncmp(a,b,LCONF_MAX_STR)==0
+
+
 /*....................
 .   Globals
 ....................*/
@@ -140,6 +157,9 @@ void init_config(DEVCONF* dconf){
         dconf->aich[ainum].nchannel = LCONF_DEF_AI_NCH;
         dconf->aich[ainum].range = LCONF_DEF_AI_RANGE;
         dconf->aich[ainum].resolution = LCONF_DEF_AI_RES;
+        dconf->aich[ainum].calslope = 1.;
+        dconf->aich[ainum].caloffset = 0.;
+        dconf->aich[ainum].label[0] = '\0';
     }
     // Analog Outputs
     dconf->naoch = 0;
@@ -150,6 +170,7 @@ void init_config(DEVCONF* dconf){
         dconf->aoch[aonum].amplitude = LCONF_DEF_AO_AMP;
         dconf->aoch[aonum].offset = LCONF_DEF_AO_OFF;
         dconf->aoch[aonum].duty = LCONF_DEF_AO_DUTY;
+        dconf->aoch[aonum].label[0] = '\0';
     }
     // Flexible IO
     dconf->nfioch = 0;
@@ -164,6 +185,7 @@ void init_config(DEVCONF* dconf){
         dconf->fioch[fionum].duty = .5;
         dconf->fioch[fionum].phase = 0.;
         dconf->fioch[fionum].counts = 0;
+        dconf->fioch[fionum].label[0] = '\0';
     }
     dconf->RB.buffer=NULL;
 }
@@ -541,6 +563,44 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
             }
             dconf[devnum].aich[ainum].resolution = itemp;
         //
+        // The AICALSLOPE parameter
+        //
+        }else if(streq(param,"aicalslope")){
+            ainum = dconf[devnum].naich-1;
+            if(ainum<0){
+                fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
+                goto lconf_loadfail;
+            // Make sure the coefficient is a valid float
+            }else if(sscanf(value,"%f",&ftemp)!=1){
+                fprintf(stderr,"LOAD: Illegal AIcalslope number \"%s\". Expected float.\n",value);
+                goto lconf_loadfail;
+            }
+            dconf[devnum].aich[ainum].calslope = ftemp;
+        //
+        // The AICALOFFSET parameter
+        //
+        }else if(streq(param,"aicaloffset")){
+            ainum = dconf[devnum].naich-1;
+            if(ainum<0){
+                fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
+                goto lconf_loadfail;
+            // Make sure the offset is a valid float
+            }else if(sscanf(value,"%f",&ftemp)!=1){
+                fprintf(stderr,"LOAD: Illegal AIcaloffset number \"%s\". Expected float.\n",value);
+                goto lconf_loadfail;
+            }
+            dconf[devnum].aich[ainum].caloffset = ftemp;
+        //
+        // The AILABEL parameter
+        //
+        }else if(streq(param,"ailabel")){
+            ainum = dconf[devnum].naich-1;
+            if(ainum<0){
+                fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
+                goto lconf_loadfail;
+            }
+            strncpy(dconf[devnum].aich[ainum].label, value, LCONF_MAX_STR);
+        //
         // The AOCHANNEL parameter
         //
         }else if(streq(param,"aochannel")){
@@ -651,6 +711,16 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
             dconf[devnum].aoch[aonum].duty = ftemp;
+        //
+        // The AOLABEL parameter
+        //
+        }else if(streq(param,"aolabel")){
+            aonum = dconf[devnum].naoch-1;
+            if(aonum<0){
+                fprintf(stderr,"LOAD: Cannot set analog output parameters before the first AOchannel parameter.\n");
+                goto lconf_loadfail;
+            }
+            strncpy(dconf[devnum].aoch[aonum].label, value, LCONF_MAX_STR);
         //
         // TRIGCHANNEL parameter
         //
@@ -840,6 +910,16 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
             }
             dconf[devnum].fioch[fionum].duty = ftemp;
         //
+        // FIOLABEL
+        //
+        }else if(streq(param,"fiolabel")){
+            fionum = dconf[devnum].nfioch-1;
+            if(fionum<0){
+                fprintf(stderr,"LOAD: Cannot set flexible input-output parameters before the first FIOchannel parameter.\n");
+                goto lconf_loadfail;
+            }
+            strncpy(dconf[devnum].fio[fionum].label, value, LCONF_MAX_STR);
+        //
         // META parameter: start/stop a meta stanza
         //
         }else if(streq(param,"meta")){
@@ -916,23 +996,24 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
     else
         fprintf(ff,"connection eth\n");
 
-    write_str(serial,serial)
-    write_str(ip,ip)
-    write_str(gateway,gateway)
-    write_str(subnet,subnet)
-    write_flt(samplehz,samplehz)
-    write_flt(settleus,settleus)
-    write_int(nsample,nsample)
+    write_str(serial,serial);
+    write_str(ip,ip);
+    write_str(gateway,gateway);
+    write_str(subnet,subnet);
+    write_flt(samplehz,samplehz);
+    write_flt(settleus,settleus);
+    write_int(nsample,nsample);
     
     // Analog inputs
     if(dconf[devnum].naich)
         fprintf(ff,"\n# Analog Inputs\n");
     for(ainum=0; ainum<dconf[devnum].naich; ainum++){
 
-        write_aiint(aichannel,channel)
-        write_aiint(ainegative,nchannel)
-        write_aiflt(airange,range)
-        write_aiint(airesolution,resolution)
+        write_aiint(aichannel,channel);
+        write_aistr(ailabel,label);
+        write_aiint(ainegative,nchannel);
+        write_aiflt(airange,range);
+        write_aiint(airesolution,resolution);
         fprintf(ff,"\n");
     }
 
@@ -940,17 +1021,18 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
     if(dconf[devnum].naoch)
         fprintf(ff,"# Analog Outputs\n");
     for(aonum=0; aonum<dconf[devnum].naoch; aonum++){
-        write_aoint(aochannel,channel)
+        write_aoint(aochannel,channel);
+        write_aolabel(aolabel,label);
         if(dconf[devnum].aoch[aonum].signal==AO_CONSTANT)  fprintf(ff,"aosignal constant\n");
         else if(dconf[devnum].aoch[aonum].signal==AO_SINE)  fprintf(ff,"aosignal sine\n");
         else if(dconf[devnum].aoch[aonum].signal==AO_SQUARE)  fprintf(ff,"aosignal square\n");
         else if(dconf[devnum].aoch[aonum].signal==AO_TRIANGLE)  fprintf(ff,"aosignal triangle\n");
         else if(dconf[devnum].aoch[aonum].signal==AO_NOISE)  fprintf(ff,"aosignal noise\n");
         else fprintf(ff,"signal ***\n");
-        write_aoflt(aofrequency,frequency)
-        write_aoflt(aoamplitude,amplitude)
-        write_aoflt(aooffset,offset)
-        write_aoflt(aoduty,duty)
+        write_aoflt(aofrequency,frequency);
+        write_aoflt(aoamplitude,amplitude);
+        write_aoflt(aooffset,offset);
+        write_aoflt(aoduty,duty);
         fprintf(ff,"\n");
     }
     // Trigger settings
@@ -959,8 +1041,8 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
         if(dconf[devnum].trigchannel == LCONF_TRIG_HSC)
             fprintf(ff,"trigchannel hsc\n");
         else
-            write_int(trigchannel,trigchannel)
-        write_flt(triglevel,triglevel)
+            write_int(trigchannel,trigchannel);
+        write_flt(triglevel,triglevel);
         if(dconf[devnum].trigedge == TRIG_RISING)
             fprintf(ff,"trigedge rising\n");
         else if(dconf[devnum].trigedge == TRIG_FALLING)
@@ -974,11 +1056,12 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
     if(dconf[devnum].nfioch){
         fprintf(ff,"# Flexible Input/Output\n");
         // Frequency
-        write_flt(fiofrequency,fiofrequency)
+        write_flt(fiofrequency,fiofrequency);
     }
     for(fionum=0; fionum<dconf[devnum].nfioch; fionum++){
         // Channel Number
-        write_fioint(fiochannel,channel)
+        write_fioint(fiochannel,channel);
+        write_fiostr(fiolabel,label);
 
         // Input/output
         if(dconf[devnum].fioch[fionum].direction==FIO_INPUT)
@@ -992,7 +1075,7 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
         }else if(dconf[devnum].fioch[fionum].signal==FIO_PWM){
             fprintf(ff, "fiosignal pwm\n");
             // Duty
-            write_fioflt(fioduty,duty)
+            write_fioflt(fioduty,duty);
             // Phase
             write_fioflt(fiodegrees,phase)
         }else if(dconf[devnum].fioch[fionum].signal==FIO_COUNT){
@@ -1018,7 +1101,7 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
             fprintf(ff, "fioedge all\n");
         // Timeout
         if(dconf[devnum].fioch[fionum].time){
-            write_fioflt(fiousec,time)
+            write_fioflt(fiousec,time);
         }
     }
 

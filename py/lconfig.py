@@ -4,7 +4,7 @@
 import os, sys
 import numpy as np
 
-__version__ = '2.0.1'
+__version__ = '3.01'
 
 #define LCONF_MAX_STR 32
 #define LCONF_MAX_READ "%32s"
@@ -45,6 +45,9 @@ class AICONF:
         self.nchannel = LCONF_DEFAULTS['LCONF_DEF_AI_NCH']
         self.range = LCONF_DEFAULTS['LCONF_DEF_AI_RANGE']
         self.resolution = LCONF_DEFAULTS['LCONF_DEF_AI_RES']
+        self.calslope = 1.
+        self.caloffset = 0.
+        self.label = ''
 
 class AOCONF:
     def __init__(self):
@@ -54,6 +57,7 @@ class AOCONF:
         self.frequency = -1
         self.offset = LCONF_DEFAULTS['LCONF_DEF_AO_OFF']
         self.duty = LCONF_DEFAULTS['LCONF_DEF_AO_DUTY']
+        self.label = ''
 
 class DEVCONF:
     def __init__(self):

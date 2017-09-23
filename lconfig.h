@@ -35,7 +35,7 @@ $chmod a+x your_exec.bin
 #include <LabJackM.h>
 
 
-#define LCONF_VERSION 3.00   // Track modifications in the header
+#define LCONF_VERSION 3.02   // Track modifications in the header
 /*
 These change logs follow the convention below:
 **LCONF_VERSION
@@ -100,6 +100,11 @@ with init_data_file() and write_data_file() utilities.
 7/2017
 - Added the HSC (high speed counter) digital trigger option
 
+**3.02
+9/2017
+- Added labels to aichannels, aochannels, and fiochannels
+- Updated lconfig.py to work properly with 3.02
+- Added the .bylabel dictionary to the dfile python objects
 */
 
 #define TWOPI 6.283185307179586

@@ -4,7 +4,7 @@
 import os, sys
 import numpy as np
 
-__version__ = '3.01'
+__version__ = '3.02'
 
 
 #define LCONF_MAX_STR 32
@@ -35,9 +35,6 @@ LCONF_DEFAULTS = {
 'LCONF_DEF_AO_DUTY': 0.5
 }
 
-# map connection indices to the connection string
-LCONF_CONNECTIONS = ['any','usb',None,'eth']
-
 
 
 class AICONF:
@@ -48,6 +45,7 @@ class AICONF:
         self.resolution = LCONF_DEFAULTS['LCONF_DEF_AI_RES']
         self.calslope = 1.
         self.caloffset = 0.
+        self.calunits = 'V'
         self.label = ''
 
 class AOCONF:
@@ -62,7 +60,14 @@ class AOCONF:
 
 class FIOCONF:
     def __init__(self):
-        
+        self.signal = 'none'
+        self.edge = 'rising'
+        self.debounce = 'none'
+        self.channel = -1
+        self.time = 0.
+        self.duty = 0.5
+        self.phase = 0.
+        self.label = ''
 
 class DEVCONF:
     def __init__(self):
@@ -105,22 +110,27 @@ filename    The full path to the configuration file
             # These dicitonaries are maps from the config file parameter name and
             #   the class member name.  They are grouped by data type.
             # Global integer map, global float map, and global string map
-            GIM = {'nsample':'nsample', 'trigchannel','trigchannel', 'trigpre':'trigpre'}
-            GFM = {'samplehz':'samplehz', 'settleus':'settleus', 'triglevel':'triglevel'}
-            GSM = {'ip':'ip', 'serial':'serial', 'gateway':'gateway', 'subnet':'subnet', 'trigedge':'trigedge'}
+            GIM = {'nsample':'nsample', 'trigchannel':'trigchannel',
+                   'trigpre':'trigpre'}
+            GFM = {'samplehz':'samplehz', 'settleus':'settleus',
+                   'triglevel':'triglevel'}
+            GSM = {'ip':'ip', 'serial':'serial', 'gateway':'gateway',
+                   'subnet':'subnet', 'trigedge':'trigedge'}
             # Analog input integer map, analog input float map, analog input string map
             AIIM = {'airesolution':'resolution'}
-            AIFM = {'airange':'range'}
-            AISM = {}
+            AIFM = {'airange':'range', 'aicalslope':'calslope', 
+                    'aicaloffset':'caloffset'}
+            AISM = {'aicalunits':'calunits','ailabel':'label'}
             # Analog output integer, float, and string map
             AOIM = {}
             AOFM = {'aoamplitude':'amplitude', 'aofrequency':'frequency', 
                     'aooffset':'offset', 'aoduty':'duty'}
-            AOSM = {'aosignal':'signal'}
+            AOSM = {'aosignal':'signal', 'aolabel':'label'}
             # FLEXIBLE IO integer, float, and string maps
             FIOIM = {}
             FIOFM = {'fiotime':'time', 'fioduty':'duty', 'fiophase':'phase'}
-            FIOSM = {'fiosignal':'signal','fioedge':'edge','fiodebounce':'debounce'}
+            FIOSM = {'fiosignal':'signal', 'fioedge':'edge',   
+                     'fiodebounce':'debounce', 'fiolabel':'label'}
 
             done = []
             this = None
@@ -306,6 +316,8 @@ start       A dictionary holding the start time for the experiment
 data        A 2D numpy array containing the raw data from the file
 analysis    A dictionary containing meta data reflecting data analysis
 afun        The function used to generate the analysis dictionary
+bylabel     A dictionary containing numpy arrays of the data channels with 
+            labels.
 
 DFILE = dfile(filename, afun=default_afun)
 
@@ -328,6 +340,8 @@ signature
         self.analysis = None
         self.afun = afun
         data = []
+        self.bylabel = {}
+        self.caldata = []
 
     
         # Throw away the configuration data (already loaded)
@@ -336,37 +350,46 @@ signature
             while param and value:
                 param,value = self._read_pair(ff)
 
-        # Start parsing data
-        line = ff.readline()
-        while line:
-            if line.startswith('#:'):
-                self.start['raw'] = line[2:].strip()
-                try:
-                    temp = line.split()
-                    # parse the time string
-                    self.start['weekday'] = temp[1]
-                    self.start['month'] = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 
-                            'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 
-                            'Dec':12}[ temp[2] ]
-                    self.start['day'] = int(temp[3])
-                    time = temp[4].split(':')
-                    self.start['hour'] = int(time[0])
-                    self.start['minute'] = int(time[1])
-                    self.start['second'] = int(time[2])
-                    self.start['year'] = int(temp[5])
-                except:
-                    pass
-                    
-            elif line.startswith('#'):
-                pass
-            else:
-                this = [float(dd) for dd in line.strip().split()]
-                if this:
-                    data.append(this)
+            # Start parsing data
             line = ff.readline()
-        self.data = np.array(data)
-        ff.close()
-    
+            while line:
+                if line.startswith('#:'):
+                    self.start['raw'] = line[2:].strip()
+                    try:
+                        temp = line.split()
+                        # parse the time string
+                        self.start['weekday'] = temp[1]
+                        self.start['month'] = {'Jan':1, 'Feb':2, 'Mar':3, 
+                                               'Apr':4, 'May':5, 'Jun':6, 
+                                               'Jul':7, 'Aug':8, 'Sep':9, 
+                                         'Oct':10, 'Nov':11, 'Dec':12}[temp[2]]
+                        self.start['day'] = int(temp[3])
+                        time = temp[4].split(':')
+                        self.start['hour'] = int(time[0])
+                        self.start['minute'] = int(time[1])
+                        self.start['second'] = int(time[2])
+                        self.start['year'] = int(temp[5])
+                    except:
+                        pass
+                        
+                elif line.startswith('#'):
+                    pass
+                else:
+                    this = [float(dd) for dd in line.strip().split()]
+                    if this:
+                        data.append(this)
+                line = ff.readline()
+            self.data = np.array(data)
+
+        # Build the by-label dictionary and apply the calibration
+        self.caldata = np.zeros_like(self.data)
+        for ainum in range(len(self.config[0].aich)):
+            thisai = self.config[0].aich[ainum]
+            self.caldata[:,ainum] = \
+                self.data[:,ainum]*thisai.calslope + thisai.caloffset
+            if thisai.label:
+                self.bylabel[thisai.label] = self.caldata[:,ainum]
+
         if self.afun!=None:
             try:
                 self.analysis = self.afun(self)

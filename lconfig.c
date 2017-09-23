@@ -1906,6 +1906,8 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
         // Read the channel directly from the original configuration
         channel = dconf[devnum].aich[ainum].channel;
         out->aich[ainum].channel = channel;
+        strncpy(out->aich[ainum].label, dconf[devnum].aich[ainum].label,
+                LCONF_MAX_STR);
 
         /* Depreciated - uses register addresses instead of names
         // Get the addresses for that channel's configuration data
@@ -1969,6 +1971,8 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
         LJM_NameToAddress("DAC0",&reg_temp,&type_temp);
         // calculate a channel number based on the target's distance from DAC0
         out->aoch[aonum].channel = ((int)ftemp - reg_temp)/2;
+        strncpy(out->aoch[aonum].label, dconf[devnum].aoch[aonum].label,
+                LCONF_MAX_STR);
         // calculate a signal frequency based on the loop size
         sprintf(stemp, "STREAM_OUT%d_LOOP_SIZE", aonum);
         err = err ? err : LJM_eReadName(handle, stemp, &ftemp);
@@ -2001,7 +2005,8 @@ int download_config(DEVCONF *dconf, const unsigned int devnum, DEVCONF *out){
         // read the channel from the existing configuration
         channel = dconf[devnum].fioch[fionum].channel;
         out->fioch[fionum].channel = channel;
-
+        strncpy(out->fioch[fionum].label, dconf[devnum].fioch[fionum].label,
+                LCONF_MAX_STR);
         // Retrieve the extended feature index for the channel
         sprintf(stemp, "DIO%d_EF_INDEX", channel);
         err = err ? err : LJM_eReadName(handle, stemp, &ftemp);

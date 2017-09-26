@@ -5,7 +5,7 @@ Headers and utilities for laboratory measurements and machine control with the
 
 By Chris Martin [crm28@psu.edu](mailto:crm28@psu.edu)
 
-Version 3.00
+Version 3.02
 
 - [About](#about)
 - [Getting started](#start)
@@ -17,6 +17,7 @@ Version 3.00
 - [The LCONFIG header constants](#constants)
 
 ## <a name="about"></a> About
+
 In the summer of 2016, I realized I needed to be able to adjust my data 
 acquisition parameters day-by-day as I was tweaking and optimizing an 
 experiment.  I love my LabJack, and the folks at LabJack do a great job of documenting their intuitive interface.  HOWEVER, the effort involved in tweaking DAQ properties on the fly AND documenting them with each experiment can be cumbersome.
@@ -44,11 +45,16 @@ LCONFIG allows automatic configuration and control of most of the T7's advanced 
     - Line-to-line phase measurement
     - Pulse width measurement
     - Pulse width output with configurable phase
+- Software trigger
+    - Rising/falling/any edge on any AI channel
+    - Can use the high-speed counter to identify a digital trigger
+    - Supports pretrigger buffering
 - Simple text-based configuration files
 - Automatic generation of data files
 - Error handling
 
 ## <a name="start"></a> Getting started
+
 To get the repository,
 
 ```
@@ -66,6 +72,7 @@ For writing your own executables, a quick tutorial on programming with the LCONF
 Once you produce your data, there's a good chance that you'll want to analyze it.  If you're a Python user, the lconfig.py module will get you up and running quickly.  Its documentation is inline.
 
 ## <a name="config"></a> Anatomy of an LCONFIG configuration file
+
 A configuration file has MANY optional contents, but all configuration files will have a few things in common.  ALL configuration directives have the same format; a parameter followed by a value separated by whitespace.
 ```
 # Configuration files can contain comments
@@ -111,6 +118,7 @@ it will never be read by load_config()
 ```
 
 ## <a name="data"></a> Anatomy of a data file
+
 Data files are written with the device configuration that was used to collect the data embedded in the file's header.  Because ## ends the configuration section, `load_config()` can open a data file just as easily as it can a configuration file.  That means an experiment can be run to repeat prior data simply by specifying the prior data file as the configuration file.
 
 Below are the first 26 lines of a data file.  The configuration section is terminated by the ## flag, and the date and time at which the measurement was started is recorded behind a #: prefix. 
@@ -147,6 +155,7 @@ airesolution 0
 ```
 
 ## <a name="params"></a> Table of Parameters
+
 These are the parameters recognized by LCONFIG.  The valid values list the values or classes of values that each parameter can legally be assigned.  The scope indicates where those values are applied.  Global scope parameters are always overwritten if they are repeated, but AI and AO parameters are written to which ever channel is active, and there may be many.
 
 | Parameter   | Valid Values                            | Scope        | Description
@@ -188,9 +197,11 @@ These are the parameters recognized by LCONFIG.  The valid values list the value
 | str:param   | string                                  | Meta | Specifies a single string parameter
 
 ## <a name="types"></a> LCONFIG data types
+
 These are the data types provided by `lconfig.h`.
 
 ### AICONF Struct
+
 Holds data relevant to the configuration of a single analog input channel
 
 | Member | Type | Description
@@ -201,6 +212,7 @@ Holds data relevant to the configuration of a single analog input channel
 | resolution | `unsigned int` | The channel's resolution index
 
 ### AOCONF Struct
+
 A structure that holds data relevant to the configuration of a single analog output channel
 
 | Member | Type | Valid for | Default | Description
@@ -213,6 +225,7 @@ A structure that holds data relevant to the configuration of a single analog out
 |duty | `double` | square, triangle | 0.5 | For a square wave, `duty` indicates the fractional time spent at the high value.  For a triangle wave, `duty` indicates the fractional time spent rising.
 
 ### FIOCONF Struct
+
 A structure that holds data relevant to the configuration of a single flexible I/O channel
 
 | Member | Type | Valid for | Default | Description
@@ -228,6 +241,7 @@ A structure that holds data relevant to the configuration of a single flexible I
 |counts | `unsigned int` | count, pwm, phase, frequency | 0 | Indicates the status of a counter input, the measured period of a PWM or frequency input (in ticks), or the measured delay of a phase input (in ticks).
 
 ### RINGBUFFER Struct
+
 This structure is responsible for managing the data stream behind the scenes.  This ring buffer struct is designed to allow data to stream continuously in chunks called "blocks."  These are nothing more than the size of the data blocks sent by `LJM_eReadStream()`, and LCONFIG always sets them to LCONF_SAMPLES_PER_READ samples per channel.
 
 | Member | Subordinate | Type | Description 
@@ -243,6 +257,7 @@ This structure is responsible for managing the data stream behind the scenes.  T
 |buffer | | `double *` | The starting address of the buffer.
 
 ### METACONF Struct
+
 A structure that defines a single meta parameter
 
 | Member | Subordinate | Type | Description 
@@ -256,6 +271,7 @@ A structure that defines a single meta parameter
 
 
 ### DEVCONF Struct
+
 This structure contains all of the information needed to configure a device.  This is the workhorse data type, and usually it is the only one that needs to be explicitly used in the host application.
 
 | Member | Type | Valid values | Description
@@ -312,7 +328,7 @@ This structure contains all of the information needed to configure a device.  Th
 |clean_data_stream| Frees the buffer memory
 |init_file_stream | Writes a header to a data file
 |write_file_stream | Calls read_data_stream and writes formatted data to a data file
-|
+|status_data_stream | Retrieves information on the data streaming process
 |update_fio | Update all flexible I/O measurements and output parameters in the FIOCONF structs
 | [**Meta Configuration**](#fun:meta) ||
 | get_meta_int, get_meta_flt, get_meta_str | Returns a meta parameter integer, floating point, or string value.  
@@ -326,8 +342,8 @@ This structure contains all of the information needed to configure a device.  Th
 |read_param | Used by the `load_config` function to strip the whitespace around parameter/value pairs
 |init_config | Writes sensible defaults to a configuration struct
 
-<a name='fun:config'></a>
-### Interacting with Configuration Files
+
+### <a name='fun:config'></a> Interacting with Configuration Files
 
 ```C
 int load_config(          DEVCONF* dconf, 
@@ -345,8 +361,8 @@ void write_config(        DEVCONF* dconf,
 
 Rather than accept file names, `write_config` accepts an open file pointer so it is convenient for creating headers for data files (which don't need to be closed after the configuration is written).  It also means that the write operation doesn't need to return an error status.
 
-<a name='fun:dev'></a>
-### Device Interaction
+### <a name='fun:dev'></a> Device Interaction
+
 ```C
 int open_config(          DEVCONF* dconf, 
                 const unsigned int devnum)
@@ -374,8 +390,8 @@ int download_config(      DEVCONF* dconf,
 
 It is important to note that some of the DEVCONF members configure parameters that are not used until a data operation is executed (like `nsample` or `samplehz`).  These parameters can never be downloaded because they do not reside persistently on the T7.
 
-<a name='fun:diag'></a>
-### Configuration Diagnostics
+### <a name='fun:diag'></a> Configuration Diagnostics
+
 ```C
 int ndev_config(          DEVCONF* dconf, 
                 const unsigned int devmax)
@@ -394,24 +410,25 @@ void show_config(         DEVCONF* dconf,
 ```
 The `show_config` function calls `download_config` and prints a detailed color-coded comparison of live parameters against the configuration parameters in the `devnum` element of the `dconf` array.  Parameters that do not match are printed in red while parameters that agree with the configuration parameters are printed in green.
 
-<a name='fun:data'></a>
-### Data Collection
+### <a name='fun:data'></a> Data Collection
+
 ```C
 int start_data_stream(    DEVCONF* dconf, 
                 const unsigned int devnum,
-                               int samples_per_read)
+                               int samples_per_read);
 
 int service_data_stream(  DEVCONF* dconf, 
-                const unsigned int devnum)
+                const unsigned int devnum);
 
 int read_data_stream(     DEVCONF* dconf, 
                 const unsigned int devnum, 
                             double **data, 
                       unsigned int *channels, 
-                      unsigned int *samples_per_read)
+                      unsigned int *samples_per_read);
 
 int stop_data_stream(     DEVCONF* dconf, 
-                const unsigned int devnum)
+                const unsigned int devnum);
+                
 ```
 There are four steps to a data acquisition process; start, service, read, and stop.  This constitutes a substantial change from version 2.03 and earlier, which had no service function.  Version 3 uses an automatically configured ring buffer, so the application never needs to perform memory management.  The addition of a service function means that the process of streaming new data into the buffer can be separated from the process of reading data from the buffer.  It also means that data streaming might not actually result in new data being made available (for example if a trigger event has not registered).
 
@@ -445,11 +462,11 @@ These functions are handy tools for monitoring the progress of a data collection
 ```C
 int init_file_stream(    DEVCONF* dconf, 
                 const unsigned int devnum,
-                             FILE* FF)
+                             FILE* FF);
                         
 int write_file_stream(     DEVCONF* dconf, 
                 const unsigned int devnum,
-                             FILE* FF)
+                             FILE* FF);
 
 ```
 These are tools for automatically writing data files from the stream data.  They accept a file pointer from an open `iostream` file.  In versions 2.03 and older, LCONFIG was responsible for managing the file opening and closing process, but as of version 3.00, it is up the application to provide an open file.
@@ -460,7 +477,7 @@ These are tools for automatically writing data files from the stream data.  They
 
 
 ```C
-int update_fio(DEVCONF* dconf, const unsigned int devnum)
+int update_fio(DEVCONF* dconf, const unsigned int devnum);
 ```
 The FIO channels represent the only features in LCONFIG that require users to interact manually with the DEVCONF struct member variables.  `update_fio` is called to command the T7 to react to changes in the FIO settings or to obtain new FIO measurements.  For example, the following code might be used to adjust flexible I/O channel 0's duty cycle to 25%.
 ```
@@ -476,23 +493,23 @@ frequency = 1e6 / dconf[devnum].fioch[0].time;
 
 The T7 supports streaming digital I/O, but `LCONFIG` does not support it as of version 3.00.  There are not currently plans to add this feature.
 
-<a name='fun:meta'></a>
-### Meta Configuration
+### <a name='fun:meta'></a> Meta Configuration
+
 ```C
 int get_meta_int(          DEVCONF* dconf, 
                  const unsigned int devnum,
                         const char* param, 
-                               int* value)
+                               int* value);
                                
 int get_meta_flt(          DEVCONF* dconf, 
                  const unsigned int devnum,
                         const char* param, 
-                            double* value)
+                            double* value);
 
 int get_meta_str(          DEVCONF* dconf, 
                  const unsigned int devnum,
                         const char* param, 
-                              char* value)
+                              char* value);
 ```
 The `get_meta_XXX` functions retrieve meta parameters from the `devnum` element of the `dconf` array by their name, `param`.  If the parameter does not exist or if it is of the incorrect type, 
 The values are written to target of the `value` pointer, and the function returns the `LCONF_ERROR` or `LCONF_NOERR` error status based on whether the parameter was found.
@@ -501,21 +518,22 @@ The values are written to target of the `value` pointer, and the function return
 int put_meta_int(          DEVCONF* dconf, 
                  const unsigned int devnum, 
                         const char* param, 
-                                int value)
+                                int value);
                                 
 int put_meta_flt(          DEVCONF* dconf, 
                  const unsigned int devnum, 
                         const char* param, 
-                             double value)
+                             double value);
 
 int put_meta_str(          DEVCONF* dconf, 
                  const unsigned int devnum, 
                         const char* param, 
-                              char* value)
+                              char* value);
 ```
 The `put_meta_XXX` functions retrieve meta parameters from the `devnum` element of the `dconf` array by their name, `param`.  The values are written to target of the `value` pointer, and the function returns the `LCONF_ERROR` or `LCONF_NOERR` error status based on whether the parameter was found.
 
 ## <a name="constants"></a> Table of LCONFIG constants
+
 These are the compiler constants provided by `lconfig.h`.
 
 | Constant | Value | Description
@@ -545,7 +563,9 @@ These are the compiler constants provided by `lconfig.h`.
 | LCONF_ERROR | 1 | Value returned on unsuccessful exit
 
 ## Future Improvements
+
 Analog input software triggering is on its way.  This is a technique for streaming continuously until a trigger event is observed in software.  Well implemented software triggers allow for generous pre-trigger buffering, so data before and after the trigger can be recorded.
 
 ## Known Bugs
+
 No persisting known bugs.

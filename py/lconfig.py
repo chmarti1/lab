@@ -107,6 +107,7 @@ filename    The full path to the configuration file
         self.filename = os.path.abspath(filename)
 
         with open(filename,'r') as ff:
+            LCONF_CONNECTIONS = ['any', 'usb', None, 'eth']
             # These dicitonaries are maps from the config file parameter name and
             #   the class member name.  They are grouped by data type.
             # Global integer map, global float map, and global string map
@@ -342,6 +343,7 @@ signature
         data = []
         self.bylabel = {}
         self.caldata = []
+        self._t = None
 
     
         # Throw away the configuration data (already loaded)
@@ -397,6 +399,23 @@ signature
                 print "Exception encounterd while executing the analysis function"
                 print sys.exc_info()[1]
 
+
+    def t(self):
+        """Return the time array for the data samples
+    t()
+Returns a numpy array beginning with 0 and increasing with the sample interval.
+It will be the same length as the number of samples in the data file.
+
+Once this function is called once, its result is stored in the _t member, so 
+redundant calls to t() are not inefficient.  This is only a problem if users
+try to write to the result of the t() function.  If users need to modify t()'s
+result, then a copy should be made
+>>> time = datafile.t().copy()
+"""
+        if self._t is None:
+            T = 1./self.config[0].samplehz
+            self._t = np.arange(0.,T*self.data.shape[0],T)
+        return self._t
 
 
 
@@ -470,7 +489,7 @@ simply reverse the values so that the larger is listed first.
 
     def _copy(self):
         """Return a copy of the COLLECTION
-    The root DFILE objects will not be dublicated, but all of the containing
+    The root DFILE objects will not be duplicated, but all of the containing
 lists and dictionaries will be.
 """
         newbie = collection()

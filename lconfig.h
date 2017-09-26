@@ -782,12 +782,28 @@ data[4]     sample1, channel1
 data[5]     sample1, channel2
 ... 
 
-The SAMPLES_READ integer indicates a running total of the number of samples read
-per channel after each read operation.
-
 Once READ_DATA_STREAM has been called, the DEVCONF struct updates its internal
 pointers, and the next call's DATA register will either point to the next 
 available block of data, or it will be NULL if the buffer is empty.
+
+It is essential that the application not attempt to read more than CHANNELS *
+SAMPLES_PER_READ data elements.  The following data might be valid, but they 
+also might wrap around the end of the ring buffer.  Instead, READ_DATA_STREAM
+should be called again to return a new valid data pointer.
+
+For example, the following might appear in a loop 
+
+int err;
+unsigned int channels, samples_per_read, index;
+double my_buffer[2048];
+double *pointer;
+... setup code ... 
+err = service_data_stream(dconf, 0);
+err = read_data_stream(dconf, 0, &data, &channels, &samples_per_read);
+if(pointer){
+    for(index=0; index<samples_per_read*channels; index++)
+        my_buffer[index] = pointer[index];
+}
 */
 int read_data_stream(DEVCONF* dconf, const unsigned int devnum, 
     double **data, unsigned int *channels, unsigned int *samples_per_read);

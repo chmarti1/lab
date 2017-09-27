@@ -3,6 +3,7 @@
 #
 import os, sys
 import numpy as np
+import json
 
 __version__ = '3.02'
 
@@ -317,10 +318,11 @@ start       A dictionary holding the start time for the experiment
 data        A 2D numpy array containing the raw data from the file
 analysis    A dictionary containing meta data reflecting data analysis
 afun        The function used to generate the analysis dictionary
+afile       The absolute path to a json file storing the analysis dictionary
 bylabel     A dictionary containing numpy arrays of the data channels with 
             labels.
 
-DFILE = dfile(filename, afun=default_afun)
+DFILE = dfile(filename, afun=default_afun, afile=None, asource='fun')
 
 filename is the full or partial path to the data file to be loaded.  It must
 conform to the lconfig format.
@@ -329,16 +331,31 @@ afun is an optional user-defined analysis function that can be called to
 produce meta-analysis parameters on the data.  It must operate with the call
 signature
 >>> DFILE.analysis = afun(DFILE)
+
+afile is an optional file name where the analysis dictionary should be saved
+in a json file format.  If afile is an empty string, then a file name will be 
+automatically generated to be in the same directory as the original dat file, 
+with the same file name, but with the extension changed to json.  To suppress
+creating the json file, pass None to the afile keyword.
+
+If the afun keyword is None, then the dfile class initializer will look for the
+afile to load the analysis instead of executing the analysis funciton.
 """
-    def __init__(self,filename,afun=default_afun):
+    def __init__(self,filename,afile='',afun=default_afun):
         # Load the configuration parameters
         cfile.__init__(self,filename)
+        if afile == '':
+            temp = os.path.basename(self.filename).split('.')
+            temp[-1] = 'json'
+            self.afile = os.path.join(self.adir,'.'.join(temp))
+        elif afile is not None:
+            self.afile = os.path.abspath(afile)
 
         # Create some new parameters for the data file
         self.start = {'raw':'', 'day':-1, 'month':-1, 'year':-1, 'weekday':-1,
                 'hour':-1, 'minute':-1, 'second':-1}
         self.data = None
-        self.analysis = None
+        self.analysis = {}
         self.afun = afun
         data = []
         self.bylabel = {}
@@ -392,13 +409,29 @@ signature
             if thisai.label:
                 self.bylabel[thisai.label] = self.caldata[:,ainum]
 
-        if self.afun!=None:
+        if self.afun is not None:
             try:
                 self.analysis = self.afun(self)
             except:
                 print "Exception encounterd while executing the analysis function"
                 print sys.exc_info()[1]
-
+    
+            if self.afile is not None:
+                try:
+                    with open(self.afile,'w') as ff:
+                        json.dump(self.analysis, ff, skipkeys=True)
+                except:
+                    print "Failed to write " + self.afile
+                    print sys.exc_info()[1]
+        else:
+            if os.path.isfile(self.afile):
+                try:                
+                    with open(self.afile,'r') as ff:
+                        self.analysis = json.load(ff)
+                except:
+                    print "Failed to load analysis file: " + self.afile
+                    print sys.exc_info()[1]
+                    
 
     def t(self):
         """Return the time array for the data samples
@@ -427,9 +460,11 @@ returning slices of the data for plotting.
     Has attributes:
 data        A list of the DFILE objects from loaded data
 afun        The analysis function passed to the dfile objects
+afile       The afile directive to pass to the dfile objects 
+            (should be '' or None)
 
     Creating and populating a COLLECTION object
->>> C = collection(afun = my_analysis_fun)
+>>> C = collection(afun = my_analysis_fun, afile='')
 >>> C.add_dir('my/test/dir')
 
     Retrieving individual DFILE objects from the collection
@@ -461,10 +496,13 @@ simply reverse the values so that the larger is listed first.
 >>> C25 = C(voltage=(2.6,2.4))
 """
 
-    def __init__(self, afun=default_afun):
+    def __init__(self, afun=default_afun, afile=''):
         self.data = []
         self.afun = afun
+        self.afile = afile
         self._record = {}
+        if self.afile not in ('',None):
+            raise Exception("The afile directive to a collection must be '' or None")
     
     def __iter__(self):
         return self.data.__iter__()

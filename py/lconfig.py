@@ -347,9 +347,13 @@ afile to load the analysis instead of executing the analysis funciton.
         if afile == '':
             temp = os.path.basename(self.filename).split('.')
             temp[-1] = 'json'
-            self.afile = os.path.join(self.adir,'.'.join(temp))
-        elif afile is not None:
+            self.afile = os.path.dirname(self.filename)
+            self.afile = os.path.join(self.afile,'.'.join(temp))
+        elif afile is None:
+            self.afile = None
+        else:
             self.afile = os.path.abspath(afile)
+            
 
         # Create some new parameters for the data file
         self.start = {'raw':'', 'day':-1, 'month':-1, 'year':-1, 'weekday':-1,
@@ -618,7 +622,7 @@ a .dat extension will be read in.
                 fullpath = os.path.join(directory,this)
                 if verbose:
                     sys.stdout.write(fullpath + '\n')
-                self.data.append(dfile(fullpath, afun=self.afun))
+                self.data.append(dfile(fullpath, afun=self.afun, afile=self.afile))
                 if pause:
                     uio = raw_input('Press enter to continue\nEnter "H" to halt:')
                     if uio == 'H':

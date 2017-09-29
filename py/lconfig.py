@@ -464,7 +464,7 @@ afile       The afile directive to pass to the dfile objects
             (should be '' or None)
 
     Creating and populating a COLLECTION object
->>> C = collection(afun = my_analysis_fun, afile='')
+>>> C = collection(afun = my_analysis_fun, asave=True)
 >>> C.add_dir('my/test/dir')
 
     Retrieving individual DFILE objects from the collection
@@ -494,15 +494,20 @@ contain all tests where the 'voltage' analysis keyword lies between 2.4 and
 To specify the opposite (that the voltage keyword NOT be between 2.4 and 2.6),
 simply reverse the values so that the larger is listed first.
 >>> C25 = C(voltage=(2.6,2.4))
+
+By default, the member dfile objects will be directed to attempt to save their
+analysis dicitonaries as json files.  This behavior can be suppressed by 
+setting asave=False in the collection initializer.
 """
 
-    def __init__(self, afun=default_afun, afile=''):
+    def __init__(self, afun=default_afun, asave=True):
         self.data = []
         self.afun = afun
-        self.afile = afile
+        self.afile = None
         self._record = {}
-        if self.afile not in ('',None):
-            raise Exception("The afile directive to a collection must be '' or None")
+        if asave:
+            self.afile = ''
+            
     
     def __iter__(self):
         return self.data.__iter__()

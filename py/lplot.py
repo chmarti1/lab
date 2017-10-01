@@ -13,6 +13,47 @@ def set_defaults(font_size=12., figure_size=(4., 3.),
     plt.rcParams['figure.figsize'] = figure_size
     
 
+
+def make_ruler(size=1., units='in'):
+    """Produce a figure with axis ticks like a ruler
+    ax = make_ruler(size=1., units='in')
+    
+This is usfeul for testing the scaling produced by the 'screen_dpi' option
+of the set_defaults() function.
+
+The units can be 'cm' or 'in'.
+
+The size indicates the size of the ruler in the units specified.
+"""
+    padding_in = .5
+    if units=='in':
+        divs = 4
+        size_in = size
+    elif units=='cm':
+        divs = 10
+        size_in = size / 2.54
+    figure_in = size_in + 2*padding_in
+    f = plt.figure(figsize = 2*(figure_in,))
+    
+    padding_fraction = padding_in / figure_in
+    size_fraction = size_in / figure_in
+    ax = f.add_axes([padding_fraction, padding_fraction, size_fraction, size_fraction], label='primary')
+
+    ax.set_xlim([0,size])
+    ax.set_ylim([0,size])
+
+    ticks = [this/float(divs) for this in range(divs*int(size)+1)]
+    ticklabels = len(ticks)*['']
+    for this in range(int(size)+1):
+        ticklabels[this*divs] = '%d'%this
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(ticklabels)
+    
+    return ax
+
+
 def init_fig(xlabel,ylabel,size=None,label_size=12.,figure_size=(8.,6.)):
     """set up a figure with a single axes
     ax = init_fig(xlabel,ylabel,size=None)
@@ -26,7 +67,7 @@ Returns the axis for plotting
     
     # Use 2x font size for the y tick labels
     # double the sum to accommodate the padding used by the axes
-    left = 2*(label_size + 2.*font_size)/figure_width
+    left = 2*(label_size + 3.*font_size)/figure_width
     w = 1.-padding-left
     bottom = 2*(label_size + font_size)/figure_height
     h = 1.-padding-bottom
@@ -72,7 +113,7 @@ scale_xxyy() function.
     figure_width = figure_size[0] * dpi
     padding = .05
 
-    left = 2.*(label_size + 2.*font_size)/figure_width
+    left = 2.*(label_size + 3.*font_size)/figure_width
     bottom = 2.*(label_size + font_size)/figure_height
 
     if x2label==None:
@@ -123,8 +164,19 @@ temperature axes:
     ax2.set_ylim([yscale * yy + yoffset for yy in ax1.get_ylim()])
     
     
-def adjust_fig(ax1, ax2=None, left=None, right=None, bottom=None, top=None):
-    """
+def adjust_ax(ax1, ax2=None, left=None, right=None, bottom=None, top=None):
+    """Tweak the bounds on axes in a figure made by lplot
+    adjust_ax(ax1, ax2=None, left=None, right=None, bottom=None, top=None)
+
+Any of the left, right, top, bottom keywords specified will interpreted as the
+fractional location (between 0 and 1) for that edge of the figure in the plot.
+    
+If ax1 and ax2 are both specified, they are presumed to be redundant axes for
+an xxyy plot.  After ax1 is adjusted, ax2 will be forced to the same shape.
+This can be useful if you do something that gets ax1 and ax2 out of sync - just
+call 
+>>> adjust_ax(ax1=ax1, ax2=ax2)
+No resizing will happen in ax1, but ax2 will now share ax1's shape.
 """
     p = ax1.get_position()
     if left:
@@ -138,3 +190,7 @@ def adjust_fig(ax1, ax2=None, left=None, right=None, bottom=None, top=None):
     ax1.set_position(p)
     if ax2:
         ax2.set_position(p)
+        
+        
+#def floating_legend():
+# Coming soon...

@@ -5,11 +5,12 @@ import matplotlib as mpl
 AX1_LABEL = 'LPLOT_AX1'
 AX2_LABEL = 'LPLOT_AX2'
 
-def set_defaults(font_size=12., figure_size=(4., 3.), 
+def set_defaults(font_size=12., legend_font_size=12., figure_size=(4., 3.), 
                  screen_dpi = 96., export_dpi=300.):
     """Applies plot style defaults to rcParams
 """
     plt.rcParams['font.size'] = font_size
+    plt.rcParams['legend.fontsize'] = legend_font_size
     plt.rcParams['figure.dpi'] = screen_dpi
     plt.rcParams['savefig.dpi'] = export_dpi
     plt.rcParams['figure.figsize'] = figure_size
@@ -79,7 +80,7 @@ The size indicates the size of the ruler in the units specified.
     return ax
 
 
-def init_fig(xlabel,ylabel,size=None,label_size=12.,figure_size=(8.,6.)):
+def init_fig(xlabel,ylabel,label_size=12.,figure_size=(8.,6.)):
     """set up a figure with a single axes
     ax = init_fig(xlabel,ylabel,size=None)
 Returns the axis for plotting    
@@ -232,7 +233,7 @@ def floating_legend(fig, loc, fmt, loc_edge='lt', vpadding_inches=.05, hpadding_
 """
 
     if label_size is None:
-        label_size = plt.rcParams['font.size']
+        label_size = plt.rcParams['legend.fontsize']
     dpi = fig.get_dpi()
     char_height_inches = label_size / dpi
     char_width_inches = 0.75 * char_height_inches
@@ -273,22 +274,6 @@ def floating_legend(fig, loc, fmt, loc_edge='lt', vpadding_inches=.05, hpadding_
     markerw = markerw_inches / width_inches
     vpadding = vpadding_inches / height_inches
     hpadding = hpadding_inches / width_inches
-    
-    print width
-    print height
-    print char_height
-    print char_width
-    print lcol_width
-    print mcol_width
-    print markerw
-    print vpadding
-    print hpadding
-    print '---'
-    print width_inches
-    print height_inches
-    print mcol_width_inches
-    print lcol_width_inches
-
     
     # Generate the axis position
     if loc_edge[1] == 't':

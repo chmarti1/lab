@@ -76,7 +76,8 @@ Vcoef       Identical to the Tcoef list, this determines the inverse polynomial
     def _polyval(self, Clim, C, x):
         if not isinstance(x,np.ndarray):
             x = np.array(x)
-        x.reshape((x.size,))
+        if x.ndim < 1:
+            x = x.reshape((x.size,))
         y = np.zeros_like(x)
         Idone = (x < Clim[0])
         if Idone.any():
@@ -430,7 +431,8 @@ def KmV(self, T, units='C'):
         raise Exception('Unrecognized temperature units')
     if not isinstance(T,np.ndarray):
         T = np.array(T)
-    T.reshape((T.size,))    
+    if T.ndim < 1:
+        T = T.reshape((T.size,))
     mV = _tc.mV(self,T,'C')
     I = T>0.
     mV[I] += a0 * np.exp(a1*(T[I]-a2)**2.)

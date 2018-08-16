@@ -918,7 +918,7 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 fprintf(stderr,"LOAD: Cannot set flexible input-output parameters before the first FIOchannel parameter.\n");
                 goto lconf_loadfail;
             }
-            strncpy(dconf[devnum].fio[fionum].label, value, LCONF_MAX_STR);
+            strncpy(dconf[devnum].fioch[fionum].label, value, LCONF_MAX_STR);
         //
         // META parameter: start/stop a meta stanza
         //
@@ -1022,7 +1022,7 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
         fprintf(ff,"# Analog Outputs\n");
     for(aonum=0; aonum<dconf[devnum].naoch; aonum++){
         write_aoint(aochannel,channel);
-        write_aolabel(aolabel,label);
+        write_aostr(aolabel,label);
         if(dconf[devnum].aoch[aonum].signal==AO_CONSTANT)  fprintf(ff,"aosignal constant\n");
         else if(dconf[devnum].aoch[aonum].signal==AO_SINE)  fprintf(ff,"aosignal sine\n");
         else if(dconf[devnum].aoch[aonum].signal==AO_SQUARE)  fprintf(ff,"aosignal square\n");
@@ -1077,7 +1077,7 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
             // Duty
             write_fioflt(fioduty,duty);
             // Phase
-            write_fioflt(fiodegrees,phase)
+            write_fioflt(fiodegrees,phase);
         }else if(dconf[devnum].fioch[fionum].signal==FIO_COUNT){
             fprintf(ff, "fiosignal count\n");
         }else if(dconf[devnum].fioch[fionum].signal==FIO_FREQUENCY){

@@ -296,7 +296,7 @@ int main(int argc, char *argv[]){
         close_config(dconf,stream_dev);
         return -1;
     }
-    close_config(dconf,0);
+    close_config(dconf,stream_dev);
     printf("DONE\n");
 
     // Perform the post data collection process

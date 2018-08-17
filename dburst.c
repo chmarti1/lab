@@ -15,12 +15,7 @@
 /*...................
 .   Global Options
 ...................*/
-char    config_file[MAXSTR] = DEF_CONFIGFILE,
-        data_file[MAXSTR] = DEF_DATAFILE,
-        samples[MAXSTR] = DEF_SAMPLES,
-        duration[MAXSTR] = DEF_DURATION,
-        metastage[LCONF_MAX_META][MAXSTR+1];
-int samples_i, duration_i, metacount;
+
 
 /*....................
 . Prototypes
@@ -53,13 +48,12 @@ const char help_text[] = \
 "     $ DBURST -f height=5.25 -i temperature=22 -s day=Monday\n"\
 "\n"\
 "-n SAMPLES\n"\
-"  Specifies the integer number of samples per channel desired.  This\n"\
+"  Specifies the integer number of samples per channel desired.  This is\n"\
 "  treated as a minimum, since DBURST will collect samples in packets\n"\
-"  specified by the NSAMPLE configuration parameter.  DBURST calculates\n"\
-"  the number of packets required to collect at least this many samples.\n"\
+"  of LCONF_SAMPLES_PER_READ (64) per channel.  LCONFIG will collect the\n"\
+"  number of packets required to collect at least this many samples.\n"\
 "\n"\
-"  For example, when the NSAMPLE parameter is configured to 64 (the \n"\
-"  default), the following is true\n"\
+"  For example, the following is true\n"\
 "    $ dburst -n 32   # collects 64 samples per channel\n"\
 "    $ dburst -n 64   # collects 64 samples per channel\n"\
 "    $ dburst -n 65   # collects 128 samples per channel\n"\
@@ -97,20 +91,106 @@ const char help_text[] = \
 . Main
 .....................*/
 int main(int argc, char *argv[]){
-    int nsample,    // number of samples to collect
-        nich, // number of channels in the operation
-        count, // a counter for loops
-        col;    // column counter for data loop
-    double ftemp;
-    int itemp;
-    char stemp[MAXSTR], param[MAXSTR];
-    unsigned int samples_streamed, samples_read, samples_waiting;
+    // DCONF parameters
+    int     nsample,        // number of samples to collect
+            nich;           // number of channels in the operation
+    // Temporary variables
+    int     count,          // a counter for loops
+            col;            // column counter for data loop
+    double  ftemp;          // Temporary float
+    int     itemp;          // Temporary integer
+    char    stemp[MAXSTR],  // Temporary string
+            param[MAXSTR];  // Parameter
+    char    optchar;
+    // Configuration results
+    char    config_file[MAXSTR] = DEF_CONFIGFILE,
+            data_file[MAXSTR] = DEF_DATAFILE;
+    int     samples = 0, 
+            duration = 0;
+    // Status registers
+    unsigned int    samples_streamed, 
+                    samples_read, 
+                    samples_waiting;
+    // Finally, the essentials; a data file and the device configuration
     FILE *dfile;
     DEVCONF dconf[1];
 
     // Parse the command-line options
-    if(parse_options(argc, argv))
-        return -1;
+    // use an outer foor loop as a catch-all safety
+    for(count=0; count<argc; count++){
+        switch(getopt(argc, argv, "hc:n:t:d:f:i:s:")){
+        // Help text
+        case 'h':
+            printf(help_text);
+            return 0;
+        // Config file
+        case 'c':
+            strcpy(config_file, optarg);
+            break;
+        // Duration
+        case 't':
+            optchar = 0;
+            if(sscanf(optarg, "%d%c", &duration, &optchar) < 1){
+                fprintf(stderr,
+                        "The duration was not a number: %s\n", optarg);
+                return -1;
+            }
+            switch(optchar){
+                case 'H':
+                    duration *= 60;
+                case 'M':
+                    duration *= 60;
+                case 's':
+                case 0:
+                    duration *= 1000;
+                case 'm':
+                    break;
+                default:
+                    fprintf(stderr,
+                            "Unexpected sample duration unit %c\n", optchar);
+                    return -1;
+            }
+            break;
+        // Sample count
+        case 'n':
+            optchar = 0;
+            if(sscanf(optarg, "%d%c", &samples, &optchar) < 1){
+                fprintf(stderr,
+                        "The sample count was not a number: %s\n", optarg);
+                return -1;
+            }
+            switch(optchar){
+                case 'M':
+                    duration *= 1000;
+                case 'k':
+                case 'K':
+                    samples *= 1000;
+                case 0:
+                    break;
+                default:
+                    fprintf(stderr,
+                            "Unexpected sample count unit: %c\n", optchar);
+                    return -1;
+            }
+            break;
+        // Data file
+        case 'd':
+            strcpy(data_file, optarg);
+            break;
+        // Process meta parameters later
+        case 'f':
+        case 'i':
+        case 's':
+            break;
+        case '?':
+            fprintf(stderr, "Unexpected option %s\n", argv[optind]);
+            return -1;
+        case -1:    // Deliberately combine -1 and default
+        default:
+            count = argc;
+            break;
+        }
+    }
 
     // Load the configuration
     printf("Loading configuration file...");
@@ -130,65 +210,76 @@ int main(int argc, char *argv[]){
     nich = nistream_config(dconf, 0);
 
     // Process the staged command-line meta parameters
-    for(metacount--; metacount>=0; metacount--){
-        if(metastage[metacount][0]=='f'){
-            if(sscanf(&metastage[metacount][1],"%[^=]=%lf",(char*)&param, &ftemp) != 2){
-                fprintf(stderr, "DBURST expected param=float format, but found %s\n", &metastage[metacount][1]);
+    // use an outer for loop as a catch-all safety
+    optind = 1;
+    for(count=0; count<argc; count++){
+        switch(getopt(argc, argv, "hc:n:t:d:f:i:s:")){
+        // Process meta parameters later
+        case 'f':
+            if(sscanf(optarg,"%[^=]=%lf",(char*) param, &ftemp) != 2){
+                fprintf(stderr, "DBURST expected param=float format, but found %s\n", optarg);
                 return -1;
             }
             printf("flt:%s = %lf\n",param,ftemp);
             if (put_meta_flt(dconf, 0, param, ftemp))
-                fprintf(stderr, "DBURST failed to set parameter %s to %lf\n", param, ftemp);
-        }else if(metastage[metacount][0]=='i'){
-            if(sscanf(&metastage[metacount][1],"%[^=]=%d",(char*)&param, &itemp) != 2){
-                fprintf(stderr, "DBURST expected param=integer format, but found %s\n", &metastage[metacount][1]);
+                fprintf(stderr, "DBURST failed to set parameter %s to %lf\n", param, ftemp);            
+            break;
+        case 'i':
+            if(sscanf(optarg,"%[^=]=%d",(char*) param, &itemp) != 2){
+                fprintf(stderr, "DBURST expected param=integer format, but found %s\n", optarg);
                 return -1;
             }
             printf("int:%s = %d\n",param,itemp);
             if (put_meta_int(dconf, 0, param, itemp))
                 fprintf(stderr, "DBURST failed to set parameter %s to %d\n", param, itemp);
-        }else if(metastage[metacount][0]=='s'){
-            if(sscanf(&metastage[metacount][1],"%[^=]=%s",(char*)&param, (char*)&stemp) != 2){
-                fprintf(stderr, "DBURST expected param=string format, but found %s\n", &metastage[metacount][1]);
+            break;
+        case 's':
+            if(sscanf(optarg,"%[^=]=%s",(char*) param, (char*) stemp) != 2){
+                fprintf(stderr, "DBURST expected param=string format, but found %s\n", optarg);
                 return -1;
             }
             printf("str:%s = %s\n",param,stemp);
             if (put_meta_str(dconf, 0, param, stemp))
                 fprintf(stderr, "DBURST failed to set parameter %s to %s\n", param, stemp);
-        }else{
-            fprintf(stderr, "DBURST unexpected error parsing staged command-line meta parameters!\n");
-            return -1;
+            break;
+        // Escape condition
+        case -1:
+            count = argc;
+            break;
+        // We've already done error handling
+        default:
+            break;
         }
     }
 
     // Calculate the number of samples to collect
     // If neither the sample nor duration option is configured, leave 
     // configuration alone
-    if(samples_i > 0 || duration_i > 0){
+    if(samples > 0 || duration > 0){
         // Calculate the number of samples to collect
-        // Use which ever is larger: samples_i or duration_i
-        nsample = (duration_i * dconf[0].samplehz) / 1000;  // duration is in ms
-        nsample = nsample > samples_i ? nsample : samples_i;
+        // Use which ever is larger: samples or duration
+        nsample = (duration * dconf[0].samplehz) / 1000;  // duration is in ms
+        nsample = nsample > samples ? nsample : samples;
         dconf[0].nsample = nsample;
     }
 
     // Print some information
     printf("  Stream channels : %d\n", nich);
     printf("      Sample rate : %.1fHz\n", dconf[0].samplehz);
-    printf(" Samples per chan : %d (%d requested)\n", dconf[0].nsample, samples_i);
+    printf(" Samples per chan : %d (%d requested)\n", dconf[0].nsample, samples);
     ftemp = dconf[0].nsample/dconf[0].samplehz;
     if(ftemp>60){
         ftemp /= 60;
         if(ftemp>60){
             ftemp /= 60;
-            printf("    Test duration : %fhr (%s requested)\n", (float)(ftemp), duration);
+            printf("    Test duration : %fhr (%d requested)\n", (float)(ftemp), duration/3600000);
         }else{
-            printf("    Test duration : %fmin (%s requested)\n", (float)(ftemp), duration);
+            printf("    Test duration : %fmin (%d requested)\n", (float)(ftemp), duration/60000);
         }
     }else if(ftemp<1)
-        printf("    Test duration : %fms (%s requested)\n", (float)(ftemp*1000), duration);
+        printf("    Test duration : %fms (%d requested)\n", (float)(ftemp*1000), duration);
     else
-        printf("    Test duration : %fs (%s requested)\n", (float)(ftemp), duration);
+        printf("    Test duration : %fs (%d requested)\n", (float)(ftemp), duration/1000);
 
 
     printf("Setting up measurement...");
@@ -264,91 +355,5 @@ int main(int argc, char *argv[]){
     printf("DONE\n");
 
     printf("Exited successfully.\n");
-    return 0;
-}
-
-
-
-int parse_options(int argc, char* argv[]){
-    int index, value, err;
-    char* target=NULL;
-    char multiplier=' ';
-
-    // The target pointer indicates to what global parameter string values
-    // will be written.  Option flags refocus the pointer and writing a value
-    // will swing the pointer back to NULL.
-    for(index=1; index<argc; index++){
-        // Help text
-        if(strncmp(argv[index],"-h",MAXSTR)==0){
-            printf(help_text);
-            return -1;
-        }else if(strncmp(argv[index],"-t",MAXSTR)==0)
-            target = duration;
-        else if(strncmp(argv[index],"-c",MAXSTR)==0)
-            target = config_file;
-        else if(strncmp(argv[index],"-n",MAXSTR)==0)
-            target = samples;
-        else if(strncmp(argv[index],"-d",MAXSTR)==0)
-            target = data_file;
-        else if(strncmp(argv[index],"-f",MAXSTR)==0 ||
-                strncmp(argv[index],"-i",MAXSTR)==0 ||
-                strncmp(argv[index],"-s",MAXSTR)==0){
-            if(metacount>LCONF_MAX_META){
-                target=NULL;
-                fprintf(stderr,"Too many meta parameters. LCONFIG only accepts %d.\n",LCONF_MAX_META);
-            }
-            // Write the type specifier as the first character
-            metastage[metacount][0] = argv[index][1];
-            // Copy the remaining text behind
-            target = &metastage[metacount][1];
-            metacount++;
-        }else if(target){
-            strncpy(target,argv[index],MAXSTR);
-            target = NULL;
-        }else{
-            target = NULL;
-            fprintf(stderr,"Unexpected parameter \"%s\"\n", argv[index]);
-            return -1;
-        }
-    }
-    // Post processing - convert the samples string to an integer
-    // Scan for an integer followed by M,K, or k
-    err = sscanf(samples,"%d%c",&samples_i, &multiplier);
-    if(err==2){
-        if(multiplier=='k' || multiplier=='K')
-            samples_i *= 1000;
-        else if(multiplier=='M')
-            samples_i *= 1000000;
-        else{
-            fprintf(stderr, "Did not recognize the sample multiplier \"%c\"\n", multiplier);
-            return -1;
-        }
-    }else if(err!=1){
-        fprintf(stderr, "Failed to parse buffer size \"%s\"\n", samples);
-        return -1;
-    }
-    // Post processing - convert the duration string to an integer
-    // Scan for an integer followed by m,s,M, or H
-    err = sscanf(duration,"%d%c",&duration_i, &multiplier);
-    if(err==2){
-        if(multiplier=='m'){
-            // NOOP Do nothing for milliseconds
-        }else if(multiplier=='s')
-            duration_i *= 1000;
-        else if(multiplier=='M')
-            duration_i *= 60000;
-        else if(multiplier=='H')
-            duration_i *= 3600000;
-        else{
-            fprintf(stderr, "Did not understand time unit \"%c\"\n", multiplier);
-            return -1;
-        }
-    }else if(err==1){
-        duration_i *= 1000;
-    }else{
-        fprintf(stderr, "Failed to parse buffer size \"%s\"\n", samples);
-        return -1;
-    }
-
     return 0;
 }

@@ -10,6 +10,7 @@
 #define DEF_DATAFILE    "dburst.dat"
 #define DEF_SAMPLES     "-1"
 #define DEF_DURATION    "-1"
+#define VERSION         "0.2"
 #define MAXSTR          128
 
 /*...................
@@ -28,12 +29,15 @@ int parse_options(int argc, char*argv[]);
 . Help text
 .....................*/
 const char help_text[] = \
-"dburst [-h] [-c CONFIGFILE] [-n SAMPLES] [-t DURATION] [-d DATAFILE]\n"\
-"     [-f|i|s param=value]\n"\
+"dburst [-h | -v] [-c CONFIGFILE] [-n SAMPLES] [-t DURATION]\n"\
+"     [-d DATAFILE] [-f|i|s param=value]\n"\
 "  Runs a single high-speed burst data colleciton operation. Data are\n"\
 "  streamed directly into ram and then saved to a file after collection\n"\
 "  is complete.  This allows higher data rates than streaming to the hard\n"\
 "  drive.\n"\
+"\n"\
+"-v\n"\
+"  Print the version number and exit.\n"\
 "\n"\
 "-c CONFIGFILE\n"\
 "  Specifies the LCONFIG configuration file to be used to configure the\n"\
@@ -118,10 +122,14 @@ int main(int argc, char *argv[]){
     // Parse the command-line options
     // use an outer foor loop as a catch-all safety
     for(count=0; count<argc; count++){
-        switch(getopt(argc, argv, "hc:n:t:d:f:i:s:")){
+        switch(getopt(argc, argv, "vhc:n:t:d:f:i:s:")){
         // Help text
         case 'h':
             printf(help_text);
+            return 0;
+        // Version number
+        case 'v':
+            printf("%s\n",VERSION);
             return 0;
         // Config file
         case 'c':

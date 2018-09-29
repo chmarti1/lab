@@ -563,9 +563,30 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
             }
             dconf[devnum].aich[ainum].resolution = itemp;
         //
-        // The AICALSLOPE parameter
+        // The AICALTYPE parameter
         //
-        }else if(streq(param,"aicalslope")){
+        }else if(streq(param,"aicaltype")){
+            ainum = dconf[devnum].naich-1;
+            if(ainum<0){
+                fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
+                goto lconf_loadfail;
+            // Make sure the coefficient is a valid float
+            }else if(streq(value, "none")){
+                dconf[devnum].aich[ainum].caltype = CAL_NONE;
+            }else if(streq(value, "linear")){
+                dconf[devnum].aich[ainum].caltype = CAL_LINEAR;
+            }else if(streq(value, "tck")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCK;
+            }else if(streq(value, "tcj")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCJ;
+            }else{
+                fprintf(stderr,"LOAD: Illegal CALTYPE: \"%s\"\n", value);
+            }
+        }
+        //
+        // The AICAL parameter
+        //
+        }else if(streq(param,"aical")){
             ainum = dconf[devnum].naich-1;
             if(ainum<0){
                 fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
@@ -575,21 +596,21 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 fprintf(stderr,"LOAD: Illegal AIcalslope number \"%s\". Expected float.\n",value);
                 goto lconf_loadfail;
             }
-            dconf[devnum].aich[ainum].calslope = ftemp;
+            dconf[devnum].aich[ainum].cal = ftemp;
         //
-        // The AICALOFFSET parameter
+        // The AIZERO parameter
         //
-        }else if(streq(param,"aicaloffset")){
+        }else if(streq(param,"aizero")){
             ainum = dconf[devnum].naich-1;
             if(ainum<0){
                 fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
                 goto lconf_loadfail;
             // Make sure the offset is a valid float
             }else if(sscanf(value,"%f",&ftemp)!=1){
-                fprintf(stderr,"LOAD: Illegal AIcaloffset number \"%s\". Expected float.\n",value);
+                fprintf(stderr,"LOAD: Illegal AIzero number \"%s\". Expected float.\n",value);
                 goto lconf_loadfail;
             }
-            dconf[devnum].aich[ainum].caloffset = ftemp;
+            dconf[devnum].aich[ainum].zero = ftemp;
         //
         // The AILABEL parameter
         //
@@ -600,6 +621,16 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 goto lconf_loadfail;
             }
             strncpy(dconf[devnum].aich[ainum].label, value, LCONF_MAX_STR);
+        //
+        // The AIUNITS parameter
+        //
+        }else if(streq(param,"aiunits")){
+            ainum = dconf[devnum].naich-1;
+            if(ainum<0){
+                fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
+                goto lconf_loadfail;
+            }
+            strncpy(dconf[devnum].aich[ainum].units, value, LCONF_MAX_STR);
         //
         // The AOCHANNEL parameter
         //
@@ -1014,6 +1045,19 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
         write_aiint(ainegative,nchannel);
         write_aiflt(airange,range);
         write_aiint(airesolution,resolution);
+        switch(dconf[devnum].aich[ainum].caltype){
+        case CAL_LINEAR:
+            fprintf(ff, "aicaltype linear\n");
+            write_aiflt(aical,cal);
+            write_aiflt(aizero,zero);
+            break;
+        case CAL_TCJ:
+            fprintf(ff, "aicaltype tcj\n");
+            break;
+        case CAL_TCK:
+            fprintf(ff, "aicaltype tck\n");
+            break;
+        }
         fprintf(ff,"\n");
     }
 

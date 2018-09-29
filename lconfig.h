@@ -105,6 +105,11 @@ with init_data_file() and write_data_file() utilities.
 - Added labels to aichannels, aochannels, and fiochannels
 - Updated lconfig.py to work properly with 3.02
 - Added the .bylabel dictionary to the dfile python objects
+
+**3.03
+9/2018
+- Cleaned up documentation!
+- Added calibration configuration - configuration ONLY.
 */
 
 #define TWOPI 6.283185307179586
@@ -172,9 +177,15 @@ typedef struct aiconf {
     unsigned int    nchannel;    // negative channel number (0-13 or 199)
     double          range;       // bipolar input range (0.01, 0.1, 1.0, or 10.)
     unsigned int    resolution;  // resolution index (0-8) see T7 docs
-    double          calslope;   // calibration slope
-    double          caloffset;  // calibration offset
-    char            calunits[LCONF_MAX_STR];   // calibration units
+    enum {
+        CAL_NONE,       // No calibration - use volts
+        CAL_LINEAR,     // Use a linear calibration with cal and zero
+        CAL_TCK,        // Thermocouple type K
+        CAL_TCJ         // type J
+    } caltype;
+    double          cal;        // calibration slope
+    double          zero;       // calibration offset
+    char            units[LCONF_MAX_STR];   // calibration units
     char            label[LCONF_MAX_STR];   // channel label
 } AICONF;
 //  The calibration and zero parameters are used by the aical function
@@ -413,6 +424,36 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   to truncate the precision of the ADC process in the name of speed.  See the
 .   T7 documentation for more information.  Unless you know what you're doing,
 .   this value should be left at 0.
+-AICALTYPE
+.   The analog input calibration type is an enumerated type indicating which
+.   type of calibration should be applied to the raw voltage data in post-
+.   processing.  Legal configuration values are
+.       NONE
+.   Just leave the measurement as a raw voltage.
+.       LINEAR
+.   Use the AICAL and AIZERO parameters to form a linear calibration.
+.       TCK
+.   Use a type-K thermocouple calibration.
+.       TCJ
+.   Use a type-J thermocouple calibration.
+-AICAL
+.   Though this parameter is not explicitly used by LCONFIG, a calibration slope
+.   can be stored in AICAL for later use by post-processing software (like 
+.   LCONFIG.PY).  Together with AIZERO, this forms the calibration equation
+.       MEAS = AICAL * (V - AIZERO)
+.   to calculate the measurement (MEAS).
+-AIZERO
+.   Though this parameter is not explicitly used by LCONFIG, a calibration
+.   zero can be stored in AIZERO for later use by post-processing software.
+-AILABEL
+.   The analog input label establishes text describing the column's data.
+.   This is not used in the data collection procedure, but it can make the
+.   raw data files easier to parse after-the-fact.
+-AIUNITS
+.   This string is intended to name the calibrated units of the channel.  If 
+.   no calibration is specified, then the units are naturally in Volts.  The
+.   AIZERO parameter will always have units of volts, and the AICAL parameter
+.   will have units AIUNITS / Volt.
 -AOCHANNEL
 .   This parameter indicates the channel number to be configured for cyclic 
 .   dynamic output (function generator).  This will be used to generate a 
@@ -717,50 +758,116 @@ int update_fio(DEVCONF* dconf, const unsigned int devnum);
 
 /*STATUS_DATA_STREAM
 Report on a data stream's status
-CHANNELS - number of analog input channels streaming
-SAMPLES_PER_READ - number of samples per channel in each read/write block
-SAMPLES_STREAMED - a running total of the samples per channel streamed into the
-                    buffer from the T7
-SAMPLES_READ - a running total of the samples per channel read from the buffer.
-SAMPLES_WAITING - the number of samples waiting in the buffer
 
-To determine the total number of samples in a read/write block, calculate
-    CHANNELS * SAMPLES_PER_READ
+* SAMPLES_STREAMED
+This is a running tally of valid samples streamed into the ring buffer.
+Samples discarded while waiting for a trigger event are NOT counted, but
+pretrigger samples are.  If the trigger is not active, then all samples
+are counted.
+
+* SAMPLES_READ
+This is a tally of the number of samples read from the ring buffer.  Each 
+call to READ_DATA_STREAM() returns a double* that the calling application
+is assumed to use to read SAMPLES_PER_READ samples from the ring buffer.
+For that reason, the SAMPLES_READ record is incremented by 
+SAMPLES_PER_READ after each call to the READ_DATA_STREAM() funciton.
+
+* SAMPLES_WAITING
+This indicates the number of samples currently waiting in the buffer.  
+It should be SAMPLES_STREAMED - SAMPLES_READ until overflows have 
+occurred. SAMPLES_WAITING is actually calculated by inspecting the 
+locations of the ring buffer's internal read and write indices.  As a 
+result, this value should always be used instead of calculating the 
+difference between SAMPLES_READ and SAMPLES_STREAMED.
 */
 void status_data_stream(DEVCONF* dconf, const unsigned int devnum,
         unsigned int *samples_streamed, unsigned int *samples_read,
         unsigned int *samples_waiting);
 
 /*ISCOMPLETE_DATA_STREAM
-Returns 1 to indicate that at least dconf[devnum].nsample samples per channel
+This function is intended to be used for burst data collection operations
+where the buffer only needs to be filled once.  ISCOMPLETE_DATA_STREAM()
+returns 1 to indicate that at least dconf[devnum].nsample samples per channel
 have been streamed from the T7.  Returns a 0 otherwise.
 */
 int iscomplete_data_stream(DEVCONF* dconf, const unsigned int devnum);
 
 /*ISEMPTY_DATA_STREAM
-Returns 1 to indicate that all data in the buffer has been read.  Returns a 0
+Like ISCOMPLETE_DATA_STREAM(), this function is intended to be useful 
+for burst data collection operations.  ISEMPTY_DATA_STREAM() returns 1 
+to indicate that all data in the buffer have been read.  Returns a 0 
 otherwise.
 */
 int isempty_data_stream(DEVCONF* dconf, const unsigned int devnum);
 
 /*START_DATA_STREAM
-Start a stream operation based on the device configuration for device devnum.
-samples_per_read can be used to override the NSAMPLE parameter in the device
-configuration.  If samples_per_read is <= 0, then the LCONF_SAMPLES_PER_READ
-value will be used instead.
+Initializes the ring buffer and start a stream operation based on the 
+device configuration for device devnum.  There are two sample count 
+parameters used to determine the behavior of data streaming:
+samples_per_read and nsample.  In both cases, the word "sample" referrs
+to what LabJack calls a "scan"; a set of measurements from all the
+configured channels.  They are addressed in more detail below.
+
+If a trigger has been configured, START_DATA_STREAM() puts the trigger
+into the TRIG_PRE state, which will cause SERVICE_DATA_STREAM() to begin
+accumulating the pre-trigger samples.  See SERVICE_DATA_STREAM() for 
+more information.
+
+* samples_per_read
+Indicates the number of samples to be transmitted in each communication
+block.  This determines the smallest increment by which the buffer size
+can be adjusted since only an integer number of service operations can
+be executed.  By default LCONF_SAMPLES_PER_READ is used when 
+samples_per_read <= 0, but its appearance as an explicit funciton 
+parameter allows individual applications to determine their own 
+communication preferences.  It is important to emphasize that this is 
+NOT exposed as a configuration parameter in the conf file.
+
+* nsample
+Unlike samples_per_read, this parameter is exposed for the user to set 
+in the configuration file.  It requests a number of samples to be 
+included in the ring buffer.  If the user were to request nsample=100,
+but samples_per_read=64, then the buffer would be set to include 128 
+samples, since two blocks of 64 samples is the smallest that would 
+satisfy the request for 100 measurements per channel.
+
+There is one exception to all of this; if the pretrigger is set to 
+exceed nsample (why?) then nsample is ignored, and pretrigger is used
+instead.  In this event, the entire data set is apparently intended to
+occur prior to the trigger.
 */
 int start_data_stream(DEVCONF* dconf, const unsigned int devnum,  // Device array and number
             int samples_per_read);    // how many samples per call to read_data_stream
 
 
 /*SERVICE_DATA_STREAM
-Read data from an active stream on the device devnum.  The SERVICE_DATA_STREAM
-function also services the software trigger state.
+The service function reads in a block of samples_per_read samples into the
+ring buffer.  If the trigger is configured, then its state is also maintained.
 
-Data are read directly from the T7 into a ring buffer in the DEVCONF struct.  
-Until data become available, READ_DATA_STREAM will return NULL data arrays,
-but once valid data are ready, READ_DATA_STREAM returns pointers into this
-ring buffer.
+A device's software trigger can be in one of four states: TRIG_IDLE, 
+TRIG_PRE, TRIG_ARMED, and TRIG_ACTIVE.  In all four cases, 
+SERVICE_DATA_STREAM() reads a block of SAMPLES_PER_READ samples from the
+DAQ, but what is done with them varies based on the trigger state.
+
+TRIG_IDLE and TRIG_ACTIVE are identical in that the data are read into
+the buffer, and no special treatment is needed.  The only distinction
+is that the TRIG_ACTIVE state should only ever appear after a trigger
+event has occurred.
+
+In the TRIG_PRE state prompts SERVICE_DATA_STREAM() to read data into 
+the buffer until at least TRIGPRE samples have been collected.  In this
+way, no trigger is allowed until the pre-trigger samples have already 
+been accumulated.  Then, the trigger state is advanced to TRIG_ARMED.
+
+In the TRIG_ARMED state, data are read as normal into the buffer, but 
+the algorithm tests for a trigger event (either an edge crossing or
+a high speed counter event).  If no trigger is found, then the oldest
+pre-trigger sample block is thrown away and the internal 
+samples_streamed counter is decreased so they are not counted.  In this
+way, samples are continuously streamed into ONLY the pre-trigger portion
+of the buffer until a trigger event occurs.  Then, the trigger is 
+promoted to the TRIG_ACTIVE state, and data are read in as normal.
+
 */
 int service_data_stream(DEVCONF* dconf, const unsigned int devnum);
 
@@ -796,13 +903,13 @@ For example, the following might appear in a loop
 int err;
 unsigned int channels, samples_per_read, index;
 double my_buffer[2048];
-double *pointer;
+double *data;
 ... setup code ... 
 err = service_data_stream(dconf, 0);
 err = read_data_stream(dconf, 0, &data, &channels, &samples_per_read);
-if(pointer){
+if(data){
     for(index=0; index<samples_per_read*channels; index++)
-        my_buffer[index] = pointer[index];
+        my_buffer[index] = data[index];
 }
 */
 int read_data_stream(DEVCONF* dconf, const unsigned int devnum, 
@@ -813,28 +920,42 @@ Halt an active stream on device devnum.
 */
 int stop_data_stream(DEVCONF* dconf, const unsigned int devnum);
 
+
+/*CLEAN_DATA_STREAM
+Once a data stream has been halted, the buffer is left allocated so that
+any remaining read operations can be completed.  To safely complete a 
+data acquisition cycle, CLEAN_DATA_STREAM() should be called when the 
+job is done to deallocate the buffer and return the state variables to
+an uninitialized state.
+
+If CLEAN_DATA_STREAM() is NOT called, subsequent calls to 
+START_DATA_STREAM() will fail because the buffer is not free.
+*/
+int clean_data_stream(DEVCONF* dconf, const unsigned int devnum);
+
+
 /*
 .
 .   File Streaming - shifting data directly to a data file
+. A file pointer, FF, should already have been opened in write mode.
 .
 */
 
 /*INIT_DATA_FILE
-Writes the configuration header and timestamp to a data file.  This should
-be called prior to write_data_file()
+Writes the configuration header and timestamp to a data file that has
+already been opened in write mode.  
 */
 int init_data_file(DEVCONF* dconf, const unsigned int devnum, FILE *FF);
 
 
-/*READ_FILE_STREAM
-Streams data from the dconf buffer to an open data file.  WRITE_DATA_FILE calls
-READ_DATA_STREAM to pull data from the device ring buffer.  The buffer will
-be empty unless there are also prior calls to SERVICE_DATA_STREAM.
+/*WRITE_DATA_FILE
+Streams data from the dconf buffer to an open data file.  The 
+WRITE_DATA_FILE() function is intended to be used in the same way as the
+READ_DATA_STREA() function, but instead of returning a pointer into a
+data buffer, this function formats and writes ASCII representations 
+directly to the data file using white-space delimited text.
 */
 int write_data_file(DEVCONF* dconf, const unsigned int devnum, FILE *FF);
-
-
-
 
 
 

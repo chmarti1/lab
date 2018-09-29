@@ -57,24 +57,20 @@ PARAMS = {
     'trigedge':     (str,   None,   'trigedge',     False),
     'triglevel':    (float, None,   'triglevel',    False),
     'trigpre':      (int,   None,   'trigpre',      False),
-    'fiofrequency': (float, None,   'fiofrequency', False),
-    'fiochannel':   (int,   'fioch','channel',      True),
-    'fiosignal':    (str,   'fioch','signal',       False),
-    'fioedge':      (str,   'fioch','edge',         False),
-    'fiodebounce':  (str,   'fioch','debounce',     False),
-    'fiodirection': (str,   'fioch','direction',    False),
-    'fiousec':      (float, 'fioch','usec',         False),
-    'fiodegrees':   (float, 'fioch','degrees',      False),
-    'fioduty':      (float, 'fioch','duty',         False),
-    'fiocount':     (int,   'fioch','count',        False),
+    'fiofrequency': (float, 'fioch','fiofrequency', False),
+    'fiochannel':   (int,   'fioch','fiofrequency', False),
+    'fiosignal':    (str,   'fioch','fiosignal',    False),
+    'fioedge':      (str,   'fioch','fioedge',      False),
+    'fiodebounce':  (str,   'fioch','fiodebounce',  False),
+    'fiodirection': (str,   'fioch','fiodirection', False),
+    'fiousec':      (float, 'fioch','fiousec',      False),
+    'fiodegrees':   (float, 'fioch','fiodegrees',   False),
+    'fioduty':      (float, 'fioch','fioduty',      False),
+    'fiocount':     (int,   'fioch','fiocount',     False),
     'aichannel':    (int,   'aich', 'channel',      True),
     'ainegative':   (_mixed,'aich', 'negative',     False),
     'airange':      (float, 'aich', 'range',        False),
     'airesolution': (int,   'aich', 'resolution',   False),
-    'aical':        (float, 'aich', 'cal',          False),
-    'aizero':       (float, 'aich', 'zero',         False),
-    'ailabel':      (str,   'aich', 'label',        False),
-    'aiunits':      (str,   'aich', 'units',        False),
     'aochannel':    (int,   'aoch', 'channel',      True),
     'aosignal':     (str,   'aoch', 'signal',       False),
     'aofrequency':  (float, 'aoch', 'frequency',    False),
@@ -94,170 +90,371 @@ METAS = {
 }
 
 
-
-def _read_word(ff):
-    ws = ' \t\n\r'
-    word = ''
-    charin = ff.read(1)
-    while charin:
-        # If the next character is a whitespace or is empty
-        if (charin in ws):
-            # AND if the word is nonempty
-            if word:
-                return word
-        elif charin == '#' and not word:
-            charin = ff.readline()
-            if charin.startswith('#'):
-                return ''
-        else:
-            word += charin
-        charin = ff.read(1)
-    return word.lower()
-
-
-
-def _load_config(ff):
-    """load_config() is a wrapper for the inner _load_config() funciton
-    This primative accepts an open file descriptor instead of a filename
-
->>> with open(filename, 'r') as ff:
-...     config = _load_config(ff)
-
-is equivalent to
-
->>> config = load_config(filename)
-"""
+def load_config(filename):
+    """Returns a list of dictionaries for the lconfig file"""
     ws = ' \t\n\r'
     nl = '\n'
     comment = '#'
     config = []
     metastate=None
-    param = _read_word(ff)
-    value = _read_word(ff) if param else ''
-    while param and value:
-        if param in PARAMS:
-            ptype, scope, member, new = PARAMS[param]
-            # Use active to point to the list of scoped elements
-            if scope is None:
-                active = config
-            else:
-                active = config[-1][scope]
-            # If the parameter triggers a new element, append an 
-            # empty dictionary
-            if new:
-                if active is config:
-                    active.append(EMPTY.copy())
-                else:
-                    active.append({})
-            # If the active scope has no active dictionary
-            elif not active:
-                raise Exception('The parameter %s belongs to scope %s, but was found outside of an appropriate stanza.'%(param, scope))
-                
-            # Finally, write to the appropriate value
-            try:
-                active[-1][member] = ptype(value)
-            except:
-                raise Exception('Failed to convert value to type: %s, %s\n'%(value, repr(typ)))
-        elif param == 'meta':
-            if value in METAS:
-                metastate = value
-            elif value in ['stop', 'end', 'none']:
-                metastate = None
-            else:
-                raise Exception('Unexpected meta type: %s\n'%(value))
-        elif ':' in param:
-            metastate, param = param.split(':')
-            config[-1]['meta'][param] = METAS[metastate](value)
-            metastate = None    
-        elif metastate is not None:
-            config[-1]['meta'][param] = METAS[metastate](value)
-        else:
-            raise Exception('Unexpected parameter: %s\n'%(param))
-
-        param = _read_word(ff)
-        value = _read_word(ff) if param else ''
-            
-    if param:
-        raise Exception('Incomplete parameter-value pair: %s'%(param))
-    return config
-
-
-def load_config(filename):
-    """Returns a list of dictionaries for the lconfig file
-    [dict0, dict1, ...]
     
-Each dictionary contains the directives found in each configuration 
-stanza.  They contain 'meta', 'aich', 'aoch', and 'fioch'
-"""
     with open(filename, 'r') as ff:
-        return _load_config(ff)
+        param = _read_word(ff)
+        value = _read_word(ff)
+        while param and value:
+            if param in PARAMS:
+                typ, scope, new = PARAMS[param]
+                # Use active to point to the list of scoped elements
+                if scope is None:
+                    active = config
+                else:
+                    # If the scope is not already in the last config dictionary
+                    # create it with an empty list
+                    if scope not in config[-1]:
+                        config[-1][scope] = []
+                    active = config[-1][scope]
+                # If the parameter triggers a new element, append an 
+                # empty dictionary
+                if new:
+                    if active is config:
+                        active.append(EMPTY.copy())
+                    else:
+                        active.append({})
+                # If the active scope has no active dictionary
+                elif not active:
+                    raise Exception('The parameter %s belongs to scope %s, but was found outside of an appropriate stanza.'%(param, scope))
+                    
+                # Finally, write to the appropriate value
+                try:
+                    active[-1][param] = typ(value)
+                except:
+                    raise Exception('Failed to convert value to type: %s, %s\n'%(value, repr(typ)))
+            elif param == 'meta':
+                if value in METAS:
+                    metastate = value
+                elif value in ['stop', 'end', 'none']:
+                    metastate = None
+                else:
+                    raise Exception('Unexpected meta type: %s\n'%(value))
+            elif ':' in param:
+                metastate, param = param.split(':')
+                config[-1]['meta'][param] = METAS[metastate](value)
+                metastate = None    
+            elif metastate is not None:
+                confo
+            else:
+                raise Exception('Unexpected parameter: %s\n'%(param))
+
+            param = _read_word(ff)
+            value = _read_word(ff)
+            
+        if param:
+            raise Exception('Incomplete parameter-value pair: %s'%(param))
+    return config
+            
+
+class AICONF:
+    def __init__(self):
+        self.channel = -1
+        self.nchannel = LCONF_DEFAULTS['LCONF_DEF_AI_NCH']
+        self.range = LCONF_DEFAULTS['LCONF_DEF_AI_RANGE']
+        self.resolution = LCONF_DEFAULTS['LCONF_DEF_AI_RES']
+        self.calslope = 1.
+        self.caloffset = 0.
+        self.calunits = 'V'
+        self.label = ''
+
+class AOCONF:
+    def __init__(self):
+        self.channel = -1
+        self.signal = 1
+        self.amplitude = LCONF_DEFAULTS['LCONF_DEF_AO_AMP']
+        self.frequency = -1
+        self.offset = LCONF_DEFAULTS['LCONF_DEF_AO_OFF']
+        self.duty = LCONF_DEFAULTS['LCONF_DEF_AO_DUTY']
+        self.label = ''
+
+class FIOCONF:
+    def __init__(self):
+        self.signal = 'none'
+        self.edge = 'rising'
+        self.debounce = 'none'
+        self.channel = -1
+        self.time = 0.
+        self.duty = 0.5
+        self.phase = 0.
+        self.label = ''
+
+class DEVCONF:
+    def __init__(self):
+        self.connection = -1
+        self.serial = ''
+        self.ip = ''
+        self.gateway = ''
+        self.subnet = ''
+        self.naich = 0
+        self.naoch = 0
+        self.nfioch = 0
+        self.samplehz = -1
+        self.nsample = 64
+        self.settleus = 1.
+        self.trigchannel = -1
+        self.triglevel = 0.
+        self.trigpre = 0
+        self.trigedge = 'rising'
+        self.aich = []
+        self.aoch = []
+        self.fioch = []
+        self.meta = {}
 
 
 
-class dfile:
+# Configuration file class
+class cfile(DEVCONF):
+    """ CFILE: ConfigurationFILE class
+    cfile( filename )
+
+Creates a configuration file object with members
+config      A list of DEVCONF objects describing the device configurations
+filename    The full path to the configuration file
+"""
+    def __init__(self, filename):
+        self.config = []
+        self.filename = os.path.abspath(filename)
+            
+            # start the parse
+            # Read in the new
+            param = self._read_word(ff)
+            value = self._read_word(ff)
+            
+            # Initialize the meta type
+            metatype = None
+
+            while param and value:
+                
+                ptype, scope, dmember, new = PARAMS[param]
+                
+                # Resolve the scope
+                if scope is None:
+                    active = self.config
+                elif not self.config:
+                    raise Exception('LCONFIG: Found parameters before the first connection parameter.')
+                elif scope in self.config[-1].__dict__:
+                    active = self.config[-1].__dict__[scope]
+                else:
+                    raise Exception('LCONFIG: Corrupt PARAMS entry: %s'%(param))
+                
+                # Create a new entry?
+                if new:
+                    active.append({})
+                    
+                
+                
+                
+                
+                # Termination characters
+                if param == 'connection':
+                    this = DEVCONF()
+                    self.config.append(this)
+                    try:
+                        index = int(value)
+                        this.connection = LCONF_CONNECTIONS[index]
+                    except:
+                        this.connection = value
+                        # if this is not an integer
+                        if value not in LCONF_CONNECTIONS:
+                            raise Exception('Unrecognized connection specifier: {:s}'.format(value))
+                    thisai = None
+                    thisao = None
+                elif not this:
+                    raise Exception('Missing CONNECTION parameter.')
+                # Global parameters
+                elif param in GSM:
+                    this.__dict__[GSM[param]] = value
+                elif param in GIM:
+                    this.__dict__[GIM[param]] = int(value)
+                elif param in GFM:
+                    this.__dict__[GFM[param]] = float(value)
+                # New analog input channel
+                elif param == 'aichannel':
+                    thisai = AICONF()
+                    this.aich.append(thisai)
+                    thisai.channel = int(value)
+                    this.naich += 1
+                elif param == 'ainegative':
+                    if value=='ground':
+                        index = 199
+                    else:
+                        index = int(value)
+                    this.nchannel = index
+                # Analog input parameters
+                elif param in AIIM:
+                    thisai.__dict__[AIIM[param]] = int(value)
+                elif param in AIFM:
+                    thisai.__dict__[AIFM[param]] = float(value)
+                elif param in AISM:
+                    thisai.__dict__[AISM[param]] = value
+                # New analog output channel
+                elif param == 'aochannel':
+                    thisao = AOCONF()
+                    this.aoch.append(thisao)
+                    thisao.channel = int(value)
+                    this.naoch += 1
+                elif param in AOIM:
+                    thisao.__dict__[AOIM[param]] = int(value)
+                elif param in AOFM:
+                    thisao.__dict__[AOFM[param]] = float(value)
+                elif param in AOSM:
+                    thisao.__dict__[AOSM[param]] = value
+                # New flexible input/output channel
+                elif param == 'fiochannel':
+                    thisfio = FIOCONF()
+                    this.fioch.append(thisfio)
+                    thisfio.channel = int(value)
+                    this.nfioch += 1
+                # FIO parameters
+                elif param in AOIM:
+                    thisfio.__dict__[FIOIM[param]] = int(value)
+                elif param in AOFM:
+                    thisfio.__dict__[FIOFM[param]] = float(value)
+                elif param in AOSM:
+                    thisfio.__dict__[FIOSM[param]] = value
+                # New meta parameter
+                elif param == 'meta':
+                    if value == 'str' or value == 'string':
+                        metatype = 's'
+                    elif value == 'int' or value == 'integer':
+                        metatype = 'i'
+                    elif value == 'flt' or value == 'float':
+                        metatype = 'f'
+                    elif value == 'none' or value == 'end' or value == 'stop':
+                        metatype = 'n'
+                    else:
+                        raise Exception('Unrecognized meta flag {:s}.'.format(param))
+                elif param.startswith('int:'):
+                    this.meta[param[4:]] = int(value)
+                elif param.startswith('flt:'):
+                    this.meta[param[4:]] = float(value)
+                elif param.startswith('str:'):
+                    this.meta[param[4:]] = value
+                elif metatype == 'i':
+                    this.meta[param] = int(value)
+                elif metatype == 'f':
+                    this.meta[param] = float(value)
+                elif metatype == 's':
+                    this.meta[param] = value
+                else:
+                    raise Exception('Unrecognized parameter: {:s}.'.format(param))
+                
+                param = self._read_word(ff)
+                value = self._read_word(ff)
+
+
+    def __len__(self):
+        return len(self.config)
+
+    def __getitem__(self,item):
+        return self.config[item]
+
+
+    def _read_word(ff):
+        ws = ' \t\n\r'
+        word = ''
+        charin = ff.read(1)
+        while charin:
+            # If the next character is a whitespace or is empty
+            if (charin in ws):
+                # AND if the word is nonempty
+                if word:
+                    return word
+            elif charin == '#' and not word:
+                charin = ff.readline()
+                if charin.startswith('#'):
+                    return ''
+            else:
+                word += charin
+            charin = ff.read(1)
+        return word.lower()
+
+
+
+
+def default_afun(fileobj):
+    """Default analysis function for dfile objects
+    Copies all meta data verbatim into the analysis dictionary
+"""
+    out = {}
+    for cfg in fileobj.config:
+        out.update(cfg.meta)
+    return out
+
+
+
+class dfile(cfile):
     """LCONFIG data file object
     Has attributes:
 filename    The full path file name of the data file
-config      The configuration dictionary loaded from the file header
+config      A list of DEVCONF objects containing the device configurations
 start       A dictionary holding the start time for the experiment
-rdata       A 2D numpy array containing the raw data from the file
-cdata       A 2D numpy array of calibrated data
+data        A 2D numpy array containing the raw data from the file
 analysis    A dictionary containing meta data reflecting data analysis
+afun        The function used to generate the analysis dictionary
+afile       The absolute path to a json file storing the analysis dictionary
+bylabel     A dictionary containing numpy arrays of the data channels with 
+            labels.
 
-    Has methods:
-apply_cal(inplace=False)        (Re)applies the calibrations
-t()                             Calculates a time array
+DFILE = dfile(filename, afun=default_afun, afile=None, asource='fun')
 
-    Supports:
-DFILE['label']      Returns the column corresponding to the label
-DFILE[ index ]      Returns the column corresponding to the index
-len(DFILE)          Returns the number of samples per channel
-
-DFILE = dfile(filename, cal=True, calinplace=False)
-
-filename 
-is the full or partial path to the data file to be loaded.  It must 
+filename is the full or partial path to the data file to be loaded.  It must
 conform to the lconfig format.
 
-cal 
-is a boolean indicating whether or not to apply the analog calibration
-to the raw data.  If cal is False, then cdata will be None.
+afun is an optional user-defined analysis function that can be called to 
+produce meta-analysis parameters on the data.  It must operate with the call
+signature
+>>> DFILE.analysis = afun(DFILE)
 
-calinplace
-is a boolean indicating whether the original raw data should be 
-preserved in rdata, or if the calibration should be applied "in place".
-When calinplace is False, the data are copied into cdata and the 
-calibrations are applied there.  When calinplace is True, the columns of
-rdata are overwritten
+afile is an optional file name where the analysis dictionary should be saved
+in a json file format.  If afile is an empty string, then a file name will be 
+automatically generated to be in the same directory as the original dat file, 
+with the same file name, but with the extension changed to json.  To suppress
+creating the json file, pass None to the afile keyword.
+
+If the afun keyword is None, then the dfile class initializer will look for the
+afile to load the analysis instead of executing the analysis funciton.
 """
-    def __init__(self,filename,cal=True,calinplace=False):
-
-        
-        self.filename = os.path.abspath(filename)
+    def __init__(self,filename,afile='',afun=default_afun):
+        # Load the configuration parameters
+        cfile.__init__(self,filename)
+        if afile == '':
+            temp = os.path.basename(self.filename).split('.')
+            temp[-1] = 'json'
+            self.afile = os.path.dirname(self.filename)
+            self.afile = os.path.join(self.afile,'.'.join(temp))
+        elif afile is None:
+            self.afile = None
+        else:
+            self.afile = os.path.abspath(afile)
+            
 
         # Create some new parameters for the data file
         self.start = {'raw':'', 'day':-1, 'month':-1, 'year':-1, 'weekday':-1,
                 'hour':-1, 'minute':-1, 'second':-1}
+        self.data = None
         self.analysis = {}
-        self.rdata = None
-        self.cdata = None
-        self.config = None
+        self.afun = afun
+        data = []
+        self.bylabel = {}
+        self.caldata = []
         self._t = None
 
-        with open(filename, 'r') as ff:
-            # Load the configuration
-            # There should only ever be one configuration, so reduce the list
-            # to JUST the dictionary there.
-            self.config = _load_config(ff)
-            if len(self.config)!=1:
-                raise Exception('DFILE: Data does not contain exactly one device configuration:\n   %s'%filename)
-            self.config = self.config[0]
     
-            # How many channels?
-            Nch = len(self.config['aich'])
-    
+        # Throw away the configuration data (already loaded)
+        with open(filename,'r') as ff:
+            param,value = self._read_pair(ff)
+            while param and value:
+                param,value = self._read_pair(ff)
+
             # Start parsing data
-            data = []
             line = ff.readline()
             while line:
                 if line.startswith('#:'):
@@ -283,78 +480,43 @@ rdata are overwritten
                     pass
                 else:
                     this = [float(dd) for dd in line.strip().split()]
-                    if len(this) == Nch:
+                    if this:
                         data.append(this)
-                    else:
-                        raise Exception('DFILE: data line does not match the number of analog channels\n')
                 line = ff.readline()
-            self.rdata = np.array(data)
+            self.data = np.array(data)
 
-        if cal:
-            self.apply_cal(calinplace)
-            
-        # Set up an index map based on the channel labels
-        self._labelmap = {}
-        index = 0
-        for channel in self.config.aich:
-            if 'label' in channel:
-                self._labelmap[channel['label']] = index
-            index += 1
-            
- 
-    def __len__(self):
-        return self.rdata.shape[0]
-        
-        
-    def __getitem__(self, key):
-        
-        # If the key is a string, resolve it into an index
-        if isinstance(key,str):
-            if key in self._labelmap:
-                key = self._labelmap[key]
-            else:
-                raise KeyError('DFILE: Label does not exist: %s\n'%(key))
-        if self.cdata:
-            return self.cdata[:,key]
-        
-        return self.rdata[:,key]
-            
-        
+        # Build the by-label dictionary and apply the calibration
+        self.caldata = np.zeros_like(self.data)
+        for ainum in range(len(self.config[0].aich)):
+            thisai = self.config[0].aich[ainum]
+            self.caldata[:,ainum] = \
+                self.data[:,ainum]*thisai.calslope + thisai.caloffset
+            if thisai.label:
+                self.bylabel[thisai.label] = self.caldata[:,ainum]
 
-    def apply_cal(self, inplace=False):
-        """Apply the analog input calibrations
-    DFILE.apply_cal(inplace=False)
+        if self.afun is not None:
+            try:
+                self.analysis = self.afun(self)
+            except:
+                print "Exception encounterd while executing the analysis function"
+                print sys.exc_info()[1]
     
-The "inplace" option conserves memory by overwriting the raw voltage 
-values in rdata with their calibrated equivalents.  cdata is then
-pointed at rdata instead of being a new array.
-"""
-        if inplace:
-            self.cdata = self.rdata
+            if self.afile is not None:
+                try:
+                    with open(self.afile,'w') as ff:
+                        json.dump(self.analysis, ff, skipkeys=True)
+                except:
+                    print "Failed to write " + self.afile
+                    print sys.exc_info()[1]
         else:
-            self.cdata = np.zeros_like(self.rdata)
-            
-        N,chans = self.rdata.shape
-        if chans != len(self.config['aich']):
-            raise Exception('DFILE: Data format does not match the input configuration.')
-        for index in range(chans):
-            channel = self.config['aich'][index]
-            cal = 1. if 'cal' not in channel else channel['cal']
-            zero = 0. if 'zero' not in channel else channel['zero']
-            if cal != 1. or zero != 0.:
-                self.cdata[:, index] = cal * (self.rdata[:, index] - zero)
-            elif self.cdata is not self.rdata:
-                self.cdata[:, index] = self.rdata[:, index]
-
-
-    def get_label(self, index):
-        """Get a channel label
-    label_string = DFILE.get_label(index)
-    
-Returns an empty string if the label is not set.
-"""
-        return '' if 'label' not in self.config['aich'][index] else self.config['aich'][index]['label']
-
+            if os.path.isfile(self.afile):
+                try:                
+                    with open(self.afile,'r') as ff:
+                        self.analysis = json.load(ff)
+                except:
+                    print "Failed to load analysis file: " + self.afile
+                    print sys.exc_info()[1]
+                    
 
     def t(self):
         """Return the time array for the data samples
@@ -369,11 +531,9 @@ result, then a copy should be made
 >>> time = datafile.t().copy()
 """
         if self._t is None:
-            T = 1./self.config['samplehz']
-            self._t = np.arange(0.,T*self.rdata.shape[0],T)
+            T = 1./self.config[0].samplehz
+            self._t = np.arange(0.,T*self.data.shape[0],T)
         return self._t
-
-
 
 
 
@@ -425,7 +585,7 @@ analysis dicitonaries as json files.  This behavior can be suppressed by
 setting asave=False in the collection initializer.
 """
 
-    def __init__(self, afun=None, asave=True):
+    def __init__(self, afun=default_afun, asave=True):
         self.data = []
         self.afun = afun
         self.afile = None

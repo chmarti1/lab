@@ -22,6 +22,10 @@ airange 0.010000
 airesolution 0
 
 aichannel 10
+ailabel final
+aiunits inches
+aical 2.5
+aizero -0.5
 ainegative 11
 airange 0.010000
 airesolution 0

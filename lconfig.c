@@ -488,7 +488,7 @@ int load_config(DEVCONF* dconf, const unsigned int devmax, const char* filename)
 
     // First, initialize the configuration array to have safe values.
     for(devnum++;devnum<devmax;devnum++)
-        init_config( &dconf[devnum] );
+        init_config(&dconf[devnum]);
 
     // Keep track of a meta type flag as a state machine.  If the flag is set
     // to a valid value ('f', 'i', or 's') all unrecognized parameters are 

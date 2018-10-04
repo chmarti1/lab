@@ -63,7 +63,7 @@ const char help_text[] = \
 int main(int argc, char *argv[]){
     // DCONF parameters
     int     nsample,        // number of samples to collected
-            nich;           // number of channels in the operation
+            row;            // row number for printing operations
     // Temporary variables
     int     count,          // a counter for loops
             err,            // LCONF return value
@@ -219,16 +219,22 @@ int main(int argc, char *argv[]){
         }
         
         // Update the output
+        row = 3;  // temporary row number
         for(ii=0; ii<dconf[0].naich; ii++){
-            fprintf(stdout, FMT_GOTO, 3+ii,1);
-            fprintf(stdout, FMT_CL);
+            fprintf(stdout, FMT_GOTO FMT_CL, row,1);
             fprintf(stdout, FMT_LINE, 
                     dconf[0].aich[ii].label,
                     ii,
                     raw_meas[ii],
                     cal_meas[ii],
                     dconf[0].aich[ii].units);
+            row ++;
         }
+        
+        fprintf(stdout, FMT_GOTO FMT_CL, row,1);
+        fprintf(stdout, "%20s      :                    %16f K\n", 
+                "Ambient Temp", Tamb);
+        row ++;
         
         // Now, wait for the refresh period
         while(1){

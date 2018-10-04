@@ -7,6 +7,10 @@ lconfig.o: lconfig.c lconfig.h
 
 # The Binaries...
 #
+monitor.bin: lconfig.o monitor.c
+	gcc monitor.c lconfig.o $(LINK) -o monitor.bin
+	chmod +x monitor.bin
+
 test.bin: lconfig.o test.c
 	gcc test.c lconfig.o $(LINK) -o test.bin
 

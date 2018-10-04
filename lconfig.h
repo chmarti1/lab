@@ -109,7 +109,8 @@ with init_data_file() and write_data_file() utilities.
 **3.03
 9/2018
 - Cleaned up documentation!
-- Added calibration configuration - configuration ONLY.
+- Added calibration configuration
+- Added apply_cal()
 */
 
 #define TWOPI 6.283185307179586
@@ -180,8 +181,15 @@ typedef struct aiconf {
     enum {
         CAL_NONE,       // No calibration - use volts
         CAL_LINEAR,     // Use a linear calibration with cal and zero
-        CAL_TCK,        // Thermocouple type K
-        CAL_TCJ         // type J
+        CAL_TCB,        // Thermocouple type B
+        CAL_TCC,        // type C
+        CAL_TCE,        // type E
+        CAL_TCJ,        // type J
+        CAL_TCK,        // type K
+        CAL_TCN,        // type N
+        CAL_TCR,        // type R
+        CAL_TCS,        // type S
+        CAL_TCT         // type T
     } caltype;
     double          cal;        // calibration slope
     double          zero;       // calibration offset
@@ -334,6 +342,36 @@ of columns of data discovered in the data when streaming.
 */
 int nostream_config(DEVCONF* dconf, const unsigned int devnum);
 
+
+/* APPLY_CAL
+Applies the channel's calibration parameters to a single measurement 
+value.  DCONF, DEVNUM, and CHANNEL specify the configuration, device, 
+and channel.  VALUE is the raw voltage measurement to which the 
+calibration will be applied.  VALUE2 is a secondary value that may be 
+needed by some measurements.
+
+The type of calibration to be applied is specified by the AICALTYPE
+parameter.  
+
+If the calibration type is none, then the value is simply returned 
+without modification.
+
+If the calibration type is linear, then value2 is ignored, and the AICAL
+and AIZERO are used to calculate the calibrated value: 
+    AICAL * (VALUE - AIZERO)
+
+If the calibration type is a thermocouple calibration, then value2 is
+interpreted as the ambient temperature in Kelvin for cold-junction-
+compensation.  By default, the result will be reported in Kelvin, but if
+the AIUNITS is one of the recognized temperature scales: "F", "C", or 
+"R", the result will be converted appropriately.  Note that the 
+cold-junction value still needs to be specified in Kelvin!
+
+*/
+double apply_cal(DEVCONF* dconf, const unsigned int devnum, 
+        const unsigned int channel, const double value, 
+        const unsigned int value2);
+
 /* LOAD_CONFIG
 Load a file by its file name.
 The file should be constructed with parameter-value sets separated by 
@@ -432,10 +470,8 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   Just leave the measurement as a raw voltage.
 .       LINEAR
 .   Use the AICAL and AIZERO parameters to form a linear calibration.
-.       TCK
-.   Use a type-K thermocouple calibration.
-.       TCJ
-.   Use a type-J thermocouple calibration.
+.       TCB, TCC, TCE, TCJ, TCK, TCN, TCR, TCS, TCT
+.   These correspond to type B, C, E, J, K, N, R, S, or T thermocouples
 -AICAL
 .   Though this parameter is not explicitly used by LCONFIG, a calibration slope
 .   can be stored in AICAL for later use by post-processing software (like 
@@ -756,8 +792,69 @@ it.
 */
 int update_fio(DEVCONF* dconf, const unsigned int devnum);
 
+
+
+/* DATA STREAMS
+LCONFIG implements an internal ring buffer to handle streaming of data
+from the LabJack.
+
+** Data stream control **
+START_DATA_STREAM()     Initializes the buffer and starts the measurement.
+SERVICE_DATA_STREAM()   Reads a block of data into the buffer and checks
+                        for a trigger event.
+READ_DATA_STREAM()      Returns a pointer into the buffer where a block
+                        of data is waiting.
+STOP_DATA_STREAM()      Halts the data stream, but leaves the buffer 
+                        intact.
+CLEAN_DATA_STREAM()     Frees the buffer memory.
+
+** Data stream status **
+STATUS_DATA_STREAM()    Returns various totals for the samples streamed
+ISCOMPLETE_DATA_STREAM()    Checks whether NSAMPLE samples have been 
+                        streamed.
+ISEMPTY_DATA_STREAM()   Checks whether the buffer has been emptied.                        
+
+Streams are usually executed in one of two modes: burst or true stream.
+In a burst, data are read until the buffer is filled.  The data will be
+processed later.  In a true stream mode, the data are processed as they
+are streamed into the ring buffer.  This is slower than a burst 
+measurement, but it can run indefinitely.
+
+In burst mode, the funcitons might be called in this order:
+
+DEVCONF dconf[1];
+double  *data;
+unsigned int samples_per_read, channels;
+...
+start_data_stream(dconf,0,-1);  // -1 implies using LCONFIG defaults
+while(!iscomplete_data_stream(dconf,0))
+    service_data_stream(dconf,0);
+stop_data_stream(dconf,0);
+while(!isempty_data_stream(dconf,0)){
+    read_data_stream(dconf,0,&data,&samples_per_read,&channels);
+    ... do something with the data ...
+}
+clean_data_stream(dconf,0);
+
+In stream mode, the functions might be called in this order:
+
+DEVCONF dconf[1];
+double  *data;
+unsigned int samples_per_read, channels;
+...
+start_data_stream(dconf,0,-1);  // -1 implies using LCONFIG defaults
+while(...run conditions...){
+    service_data_stream(dconf,0);
+    read_data_stream(dconf,0,&data,&samples_per_read,&channels);
+    ... do something with the data ...
+}
+stop_data_stream(dconf,0);
+clean_data_stream(dconf,0);
+*/
+
+
 /*STATUS_DATA_STREAM
-Report on a data stream's status
+Report on a data stream's status.
 
 * SAMPLES_STREAMED
 This is a running tally of valid samples streamed into the ring buffer.
@@ -770,7 +867,8 @@ This is a tally of the number of samples read from the ring buffer.  Each
 call to READ_DATA_STREAM() returns a double* that the calling application
 is assumed to use to read SAMPLES_PER_READ samples from the ring buffer.
 For that reason, the SAMPLES_READ record is incremented by 
-SAMPLES_PER_READ after each call to the READ_DATA_STREAM() funciton.
+SAMPLES_PER_READ after each call to the READ_DATA_STREAM() funciton that
+returns a non-NULL data pointer.
 
 * SAMPLES_WAITING
 This indicates the number of samples currently waiting in the buffer.  
@@ -779,6 +877,10 @@ occurred. SAMPLES_WAITING is actually calculated by inspecting the
 locations of the ring buffer's internal read and write indices.  As a 
 result, this value should always be used instead of calculating the 
 difference between SAMPLES_READ and SAMPLES_STREAMED.
+
+If SAMPLES_STREAMED, SAMPLES_READ, or SAMPLES_WAITING are NULL pointers,
+they will be ignored instead of written.  This permits applications
+to request only the parameters that are needed.
 */
 void status_data_stream(DEVCONF* dconf, const unsigned int devnum,
         unsigned int *samples_streamed, unsigned int *samples_read,
@@ -956,7 +1058,6 @@ data buffer, this function formats and writes ASCII representations
 directly to the data file using white-space delimited text.
 */
 int write_data_file(DEVCONF* dconf, const unsigned int devnum, FILE *FF);
-
 
 
 

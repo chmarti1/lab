@@ -1,6 +1,7 @@
 
 #include <stdio.h>      // 
 #include <stdlib.h>     // for rand, malloc, and free
+#include <ctype.h>      // for character classificaitons
 #include <string.h>     // for strncmp and strncpy
 #include <math.h>       // for sin and cos
 #include <limits.h>     // for MIN/MAX values of integers
@@ -52,6 +53,8 @@ void strlower(char* target){
         N++;
     }
 }
+
+
 
 
 int array_address(const char* root_address, unsigned int channel){
@@ -128,6 +131,74 @@ void read_param(FILE *source, char *param){
 }
 
 
+// Returns 1 on normal operation
+// Returns 0 at end of configuration
+// Returns -1 to indicate an error
+int read_word(FILE *source, char *word){
+    int tempc;       // Temporary character
+    char comment;    // Flag indicating a comment is active
+    unsigned int N=0;
+    
+    // clear the parameter
+    // if the operation fails, this will return gracefully
+    word[0] = '\0';
+    comment = 0;
+    // Gobble the leading whitespace
+    do{
+        // Read in a character
+        tempc = fgetc(source);
+        // If we are currently in a comment
+        if(comment){
+            // Terminate the comment at the EOL or EOF
+            if(tempc=='\n' || tempc==EOF)
+                comment = 0;
+        // If this is the beginning of a comment
+        }else if(tempc=='#'){
+            comment = 1;
+            // If the termination ## is found,
+            if(fgetc(source) == '#'){
+                // Gobble the rest of the line and exit
+                do{
+                    tempc = fgetc(source);
+                }while(tempc!='\n' && tempc!=EOF);
+                // Force word to be empty
+                word[0] = '\0';
+                return 0;
+            }
+        }
+    } while(comment || isspace(tempc));
+    // tempc now contains the first character of the word to be read in
+    // If this is the EOF, then return an empty string
+    if(tempc==EOF){
+        word[0] = '\0';
+        return 0;
+    }else if(tempc=='"'){
+        // If the word being read is in quotes
+        // Read until a '"' is found or EOF or max string length
+        tempc = fgetc(source);
+        while(tempc!='"'){
+            if(tempc==EOF || N>LCONF_MAX_STR){
+                fprintf(stderr, "LCONF: Unterminated string in configuration file!\n");
+                return -1;
+            }
+            word[N] = (char)tempc;
+            N++;
+            tempc = fgetc(source);
+        }
+        word[N] = '\0';
+    }else{
+        do{
+            word[N] = (char)tolower(tempc);
+            N++;
+            tempc = fgetc(source);
+        }while(tempc!=EOF && !isspace(tempc));
+        word[N] = '\0';
+        
+    }
+    return 1;
+}
+
+
 void init_config(DEVCONF* dconf){
     int ainum, aonum, metanum, fionum;
     // Global configuration
@@ -157,8 +228,9 @@ void init_config(DEVCONF* dconf){
         dconf->aich[ainum].nchannel = LCONF_DEF_AI_NCH;
         dconf->aich[ainum].range = LCONF_DEF_AI_RANGE;
         dconf->aich[ainum].resolution = LCONF_DEF_AI_RES;
-        dconf->aich[ainum].calslope = 1.;
-        dconf->aich[ainum].caloffset = 0.;
+        dconf->aich[ainum].caltype = CAL_NONE;
+        dconf->aich[ainum].cal = 1.;
+        dconf->aich[ainum].zero = 0.;
         dconf->aich[ainum].label[0] = '\0';
     }
     // Analog Outputs
@@ -327,6 +399,71 @@ int ndev_config(DEVCONF* dconf, const unsigned int devmax){
     return devmax;
 }
 
+double apply_cal(DEVCONF* dconf, const unsigned int devnum, 
+        const unsigned int channel, const double value, 
+        const unsigned int value2){
+            
+    double result;      // Result register
+    char convT = 0;     // Flag: perform temperature conversion?
+    AICONF *aich;       // Pointer into the channel's configuration
+    aich = &dconf[devnum].aich[channel];
+    // Case out the known calibrations
+    switch(aich->caltype){
+    case CAL_LINEAR:
+        result = aich->cal*(value - aich->zero);
+        break;
+    case CAL_TCB:
+        LJM_TCVoltsToTemp(LJM_ttB, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCC:
+        LJM_TCVoltsToTemp(LJM_ttC, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCE:
+        LJM_TCVoltsToTemp(LJM_ttE, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCJ:
+        LJM_TCVoltsToTemp(LJM_ttJ, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCK:
+        LJM_TCVoltsToTemp(LJM_ttK, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCN:
+        LJM_TCVoltsToTemp(LJM_ttN, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCR:
+        LJM_TCVoltsToTemp(LJM_ttR, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCS:
+        LJM_TCVoltsToTemp(LJM_ttS, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_TCT:
+        LJM_TCVoltsToTemp(LJM_ttT, value, value2, &result);
+        convT = 1;
+        break;
+    case CAL_NONE:
+    default:
+        return value;
+    }
+    
+    if(convT){
+        if(streq(aich->units, "F"))
+            result = result*1.8 - 459.67;
+        else if(streq(aich->units, "C"))
+            result -= 273.15;
+        else if(streq(aich->units, "R"))
+            result *= 1.8;
+    }
+    
+    return result;
+}
 
 /*....................................
 .
@@ -370,21 +507,37 @@ int load_config(DEVCONF* dconf, const unsigned int devmax, const char* filename)
     // Read the entire file
     while(!feof(ff)){
         // Read in the parameter name
-        read_param(ff,param);
-        strlower(param);
-        // if the "##" termination sequence is discovered
-        if(param[0]=='#' && param[1]=='#'){
+        switch(read_word(ff,param)){
+        // End of file
+        case 0:
             fclose(ff);
             return LCONF_NOERR;
+            break;
+        // Error
+        case -1:
+            fclose(ff);
+            fprintf(stderr,
+                    "LOAD: Failed while parsing configuration file:\n"\
+                    "  %s\n", filename);
+            return LCONF_ERROR;
+        default:
+            // Everything's fine!
+            break;
         }
         // Read in the parameter's value
-        read_param(ff,value);
-        strlower(value);
-        // if the "##" termination sequence is discovered
-        if(param[0]=='#' && param[1]=='#'){
-            fprintf(stderr,"LOAD: Unexpected termination \"##\" while parsing parameter \"%s\".\n",param);
+        switch(read_word(ff,value)){
+        // End of file
+        case 0:
+        // Error
+        case -1:
             fclose(ff);
+            fprintf(stderr,
+                    "LOAD: Unexpected end of configuration file:\n"\
+                    "  %s\n", filename);
             return LCONF_ERROR;
+        default:
+            // Everything's fine!
+            break;
         }
 
         // Case out the parameters
@@ -575,14 +728,27 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 dconf[devnum].aich[ainum].caltype = CAL_NONE;
             }else if(streq(value, "linear")){
                 dconf[devnum].aich[ainum].caltype = CAL_LINEAR;
-            }else if(streq(value, "tck")){
-                dconf[devnum].aich[ainum].caltype = CAL_TCK;
+            }else if(streq(value, "tcb")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCB;
+            }else if(streq(value, "tcc")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCC;
+            }else if(streq(value, "tce")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCE;
             }else if(streq(value, "tcj")){
                 dconf[devnum].aich[ainum].caltype = CAL_TCJ;
+            }else if(streq(value, "tck")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCK;
+            }else if(streq(value, "tcn")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCN;
+            }else if(streq(value, "tcr")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCR;
+            }else if(streq(value, "tcs")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCS;
+            }else if(streq(value, "tct")){
+                dconf[devnum].aich[ainum].caltype = CAL_TCT;
             }else{
                 fprintf(stderr,"LOAD: Illegal CALTYPE: \"%s\"\n", value);
             }
-        }
         //
         // The AICAL parameter
         //
@@ -2621,10 +2787,14 @@ void status_data_stream(DEVCONF* dconf, const unsigned int devnum,
         unsigned int *samples_waiting){
 
     if(dconf[devnum].RB.buffer){
-        *samples_streamed = dconf[devnum].RB.samples_streamed;
-        *samples_read = dconf[devnum].RB.samples_read;
+        if(samples_streamed)
+            *samples_streamed = dconf[devnum].RB.samples_streamed;
+        if(samples_read)
+            *samples_read = dconf[devnum].RB.samples_read;
         // Case out the read and write status
-        if(dconf[devnum].RB.read == dconf[devnum].RB.size_samples)
+        if(!samples_waiting){}
+            // Do not write if samples_waiting is NULL
+        else if(dconf[devnum].RB.read == dconf[devnum].RB.size_samples)
             *samples_waiting = dconf[devnum].RB.size_samples / dconf[devnum].RB.channels;
         // If read has wrapped around the end of the buffer
         else if(dconf[devnum].RB.write < dconf[devnum].RB.read)

@@ -144,19 +144,19 @@ int main(int argc, char *argv[]){
                 return -1;
             }
             switch(optchar){
-                case 'H':
-                    duration *= 60;
-                case 'M':
-                    duration *= 60;
-                case 's':
-                case 0:
-                    duration *= 1000;
-                case 'm':
-                    break;
-                default:
-                    fprintf(stderr,
-                            "Unexpected sample duration unit %c\n", optchar);
-                    return -1;
+            case 'H':
+                duration *= 60;
+            case 'M':
+                duration *= 60;
+            case 's':
+            case 0:
+                duration *= 1000;
+            case 'm':
+                break;
+            default:
+                fprintf(stderr,
+                        "Unexpected sample duration unit %c\n", optchar);
+                return -1;
             }
             break;
         // Sample count
@@ -168,17 +168,17 @@ int main(int argc, char *argv[]){
                 return -1;
             }
             switch(optchar){
-                case 'M':
-                    duration *= 1000;
-                case 'k':
-                case 'K':
-                    samples *= 1000;
-                case 0:
-                    break;
-                default:
-                    fprintf(stderr,
-                            "Unexpected sample count unit: %c\n", optchar);
-                    return -1;
+            case 'M':
+                duration *= 1000;
+            case 'k':
+            case 'K':
+                samples *= 1000;
+            case 0:
+                break;
+            default:
+                fprintf(stderr,
+                        "Unexpected sample count unit: %c\n", optchar);
+                return -1;
             }
             break;
         // Data file

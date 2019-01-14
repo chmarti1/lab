@@ -8,7 +8,7 @@ lconfig.o: lconfig.c lconfig.h
 # The Binaries...
 #
 monitor.bin: monitor.c ldisplay.h lconfig.o lgas.h psat.h
-	gcc lconfig.o monitor.c -lljacklm $(LINK) -o monitor.bin
+	gcc lconfig.o monitor.c  -lm -o monitor.bin
 
 test.bin: lconfig.o test.c
 	gcc test.c lconfig.o $(LINK) -o test.bin
@@ -24,10 +24,6 @@ drun: lconfig.o drun.c
 dburst: lconfig.o dburst.c
 	gcc lconfig.o dburst.c $(LINK) -o dburst
 	chmod +x dburst
-
-gasmon: gasmon.c ldisplay.h lgas.h
-	gcc -Wall gasmon.c -lljacklm -o gasmon
-	chmod +x gasmon
 
 test: lconfig.o test.c
 	gcc lconfig.o test.c $(LINK) -o test

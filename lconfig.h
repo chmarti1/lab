@@ -800,9 +800,9 @@ double *pointer;
 ... setup code ... 
 err = service_data_stream(dconf, 0);
 err = read_data_stream(dconf, 0, &data, &channels, &samples_per_read);
-if(pointer){
+if(data){
     for(index=0; index<samples_per_read*channels; index++)
-        my_buffer[index] = pointer[index];
+        my_buffer[index] = data[index];
 }
 */
 int read_data_stream(DEVCONF* dconf, const unsigned int devnum, 

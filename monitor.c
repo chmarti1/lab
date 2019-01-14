@@ -1,7 +1,7 @@
 #include "ldisplay.h"       // For the display helper functions
-#include "lconfig.h"        // For control of the T7
 #include "lgas.h"           // For gas measurements from the U12
 #include "psat.h"           // For water/steam properties in heat calculations
+#include "lconfig.h"
 #include <unistd.h>         
 
 
@@ -74,18 +74,18 @@ int get_tc(DEVCONF* localdconf, const int devnum);
 /* COOLANT_HEAT
 .   How much heat went into the coolant.  Uses global variables air_gps, 
 .   water_gps, cool_Thigh_C, cool_Tlow_C.  Writes result to cool_Q_kW.
-*/
+* /
 int coolant_heat(void);
-
+*/
 
 /* PLATE_HEAT
 .   Calculates the heat conducted through the plate in kW and the peak plate
 .   temperature in degrees C.  PLATE_HEAT uses global variables, plate_Thigh_C, 
 .   plate_Tlow_C, cool_Thigh_C, cool_Tlow_C. It writes results to global 
 .   varaibles plate_Q_kW and plate_Tpeak_C.
-*/
+* /
 int plate_heat(void);
-
+*/
 
 /* INIT_DISPLAY
 .   This prints the parameter text and headers to the screen.  The 
@@ -109,31 +109,25 @@ void update_display(void);
  ********************************/
 
 int main(){
-    DEVCONF dconf[1];
     int ii, jj;
     double ftemp;
+    DEVCONF dconf[1];
     static const double orifice_mm2 = 0.4948;   // 1/32" orifice area
     char input[INPUT_LEN];
     char go_f = 1;
 
-    load_config(dconf, 1, CONFIG_FILE);
-    open_config(dconf, 0);
-    upload_config(dconf, 0);
-
+	load_config(dconf, 1, CONFIG_FILE);
+    open_config(dconf,0);
+    upload_config(dconf,0);
+    
     // Get the oxygen and fuel gas zero settings
     if(!get_meta_flt(dconf,0,"o2offset",&ftemp))
         LGAS_O2_OFFSET_SCFH = ftemp;
     if(!get_meta_flt(dconf,0,"fgoffset",&ftemp))
         LGAS_FG_OFFSET_SCFH = ftemp;
+    
 
-    // Check to make sure the sample count will fit in the buffer
-    if(dconf[0].nsample > NAVG_MAX){
-        printf( "Bad value for NSAMPLE in configuration file: %s\n"  
-                "The maximum allowed by this binary is %d.\n", 
-                CONFIG_FILE, NAVG_MAX);
-        return 1;
-    }
-
+    
     init_display();
     setup_keypress();
     while(go_f){
@@ -143,12 +137,8 @@ int main(){
         flow_scfh = oxygen_scfh + fuel_scfh;
         ratio_fto = fuel_scfh / oxygen_scfh;
 
-        // Get thermocouple measurements
-        get_tc(dconf, 0);
-
-        // Update the calculated properties
-        coolant_heat();
-        plate_heat();
+		// Get thermocouples
+		get_tc(dconf, 0);
 
         // User input?
         if(prompt_on_keypress(escape,prompt,input,INPUT_LEN)){
@@ -205,16 +195,20 @@ int get_analog(double * read_water, double * read_air, double * read_standoff){
 }
 */
 
+
 //******************************************************************************
 int get_tc(DEVCONF* localdconf, const int devnum){
-    double buffer[4*NAVG_MAX];
+    double *data=NULL;
     double Tamb, V[4], T[4];
-    unsigned int ii, jj;
+    unsigned int ii, jj, channels, samples_per_read;
 
     // Collect raw thermocouple voltages
     // This is a blocking operation!
     start_data_stream(localdconf,devnum,-1);
-    read_data_stream(localdconf,devnum,buffer);
+    while(data==NULL){
+		service_data_stream(localdconf,devnum);
+		read_data_stream(localdconf,devnum, &data, &channels, &samples_per_read);
+	}
     stop_data_stream(localdconf,devnum);
 
     // Get the approximate ambient temperature
@@ -223,7 +217,7 @@ int get_tc(DEVCONF* localdconf, const int devnum){
     // Average the tiny voltages and convert to temperature
     for(jj=0; jj<4; jj++){
         for(ii=0; ii<localdconf[devnum].nsample; ii++)
-            V[jj] += buffer[ii*4+jj];
+            V[jj] += data[ii*4+jj];
         V[jj]/=localdconf[devnum].nsample;
         LJM_TCVoltsToTemp(LJM_ttK, V[jj], Tamb, &T[jj]);
         T[jj] -= 273.15;    // convert to C
@@ -300,7 +294,7 @@ void update_display(void){
     fflush(stdout);
 }
 
-
+/*
 //*****************************************************************************
 int coolant_heat(void){
     double  Thigh_K,        // High temperature in K
@@ -355,8 +349,9 @@ int coolant_heat(void){
     cool_Q_kW = .001 * Q;
     return 0;
 }
+*/
 
-
+/*
 //*****************************************************************************
 int plate_heat(void){
     double dT, n, th, tl, Tc;
@@ -373,3 +368,4 @@ int plate_heat(void){
     plate_Q_kW = .0042 * dT;
     return 0;
 }
+*/

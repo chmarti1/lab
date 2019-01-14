@@ -56,6 +56,13 @@ double LGAS_PREF_PA = 100000.;
 int get_gas(double * o2_scfh, double * fg_scfh);
 
 
+/* ZERO_GAS
+.	Collect zero flow rate measurements to determine the calibration offsets.
+.	If the measurements do not appear to be zero, the operation is aborted and
+.   a non-zero error code is returned.
+*/
+int zero_gas(void);
+
 /* CONVERT_TO_MASS
 .   Convert from scfh to a mass flow; requires the molecular weight of the gas.
 .   Returns mass flow in grams per second.
@@ -112,6 +119,60 @@ int get_gas(double * o2_scfh, double * fg_scfh){
 
     return 0;
 }
+
+
+int zero_gas(void){
+    long err, over;
+    char error_string[50];
+    const long gain = 3;    // +/- 5V range
+	const float small = 1.;
+    float volts;
+
+    // Read in the oxygen flow
+    err = EAnalogIn( &LGAS_U12_ID, 0, LGAS_O2_CHANNEL, gain, &over, &volts);
+    if(err){
+        GetErrorString(err,error_string);
+        printf( "ZERO_GAS: Error durring oxygen measurement.\n"
+                "Received error: %s\n", error_string);
+        return 1;
+    }
+    if(over){
+        printf( "ZERO_GAS: Oxygen voltage exceeded measurement range.\n");
+	}
+
+	// If the voltage isn't small!
+	if(volts*volts > small*small){
+		printf("ZERO_GAS: Oxygen voltage exceeded %f V\n", volts);
+		return 1;
+	}else{
+		// Apply the calibration
+		LGAS_O2_OFFSET_SCFH = - volts * LGAS_O2_SLOPE_SCFH;
+	}
+
+    // Read in the FG flow
+    err = EAnalogIn( &LGAS_U12_ID, 0, LGAS_FG_CHANNEL, gain, &over, &volts);
+    if(err){
+        GetErrorString(err,error_string);
+        printf( "ZERO_GAS: Error durring fuel gas measurement.\n"
+                "Received error: %s\n", error_string);
+        return 1;
+    }
+    if(over){
+        printf( "ZERO_GAS: Fuel gas voltage exceeded measurement range.\n");
+	}
+
+	// If the voltage isn't small!
+	if(volts*volts > small*small){
+		printf("ZERO_GAS: Fuel gas voltage exceeded %f V\n", volts);
+		return 1;
+	}else{
+		// Apply the calibration
+		LGAS_FG_OFFSET_SCFH = - volts * LGAS_FG_SLOPE_SCFH;
+	}
+
+    return 0;
+}
+
 
 
 

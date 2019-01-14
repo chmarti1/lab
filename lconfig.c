@@ -1421,7 +1421,7 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
         }
         // Get the buffer address
         stemp[0] = '\0';
-        sprintf(stemp, "STREAM_OUT%d_BUFFER", aonum);
+        sprintf(stemp, "STREAM_OUT%d_BUFFER_F32", aonum);
         LJM_NameToAddress(stemp, &reg_temp, &type_temp);
 
         // Case out the different signal types
@@ -2837,6 +2837,9 @@ int read_data_stream(DEVCONF* dconf, const unsigned int devnum,
 int stop_data_stream(DEVCONF* dconf, const unsigned int devnum){
     int err;
     err = LJM_eStreamStop(dconf[devnum].handle);
+    
+    clean_buffer(&dconf[devnum].RB);
+    
     if(err){
         fprintf(stderr,"LCONFIG: Error stopping a data stream on device %d.\n",devnum);
         LJM_ErrorToString(err, err_str);

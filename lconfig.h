@@ -35,7 +35,7 @@ $chmod a+x your_exec.bin
 #include <LabJackM.h>
 
 
-#define LCONF_VERSION 3.02   // Track modifications in the header
+#define LCONF_VERSION 3.04   // Track modifications in the header
 /*
 These change logs follow the convention below:
 **LCONF_VERSION
@@ -105,12 +105,21 @@ with init_data_file() and write_data_file() utilities.
 - Added labels to aichannels, aochannels, and fiochannels
 - Updated lconfig.py to work properly with 3.02
 - Added the .bylabel dictionary to the dfile python objects
+
+** 3.04
+2/2019
+- Wrote and proofed drun and dburst generic data collection binaries
+- Re-wrote python data loading support; shifted to dictionary-based config
+- 3.03 added the AICAL parameters, but they were not fully tested, nor
+    were they properly documented.  3.04 brings them in properly.
+- Added support for string parsing; inside of "" parameters can be 
+    capital letters, and whitespace is allowed.
+- Lengthened the longest supported string to 80 characters.
 */
 
 #define TWOPI 6.283185307179586
 
-#define LCONF_MAX_STR 32    // longest supported string
-#define LCONF_MAX_READ "%32s"
+#define LCONF_MAX_STR 80    // longest supported string
 #define LCONF_MAX_META 32   // how many meta parameters should we allow?
 #define LCONF_MAX_STCH 15   // maximum number of streaming channels allowed (LCONF_MAX_NAICH + LCONF_MAX_NAOCH)
 #define LCONF_MAX_AOCH 1    // maximum analog output channel number allowed
@@ -173,7 +182,7 @@ typedef struct aiconf {
     double          range;       // bipolar input range (0.01, 0.1, 1.0, or 10.)
     unsigned int    resolution;  // resolution index (0-8) see T7 docs
     double          calslope;   // calibration slope
-    double          caloffset;  // calibration offset
+    double          calzero;    // calibration offset
     char            calunits[LCONF_MAX_STR];   // calibration units
     char            label[LCONF_MAX_STR];   // channel label
 } AICONF;
@@ -338,7 +347,19 @@ A double ## indicates the end of the configuration area, and LOAD_CONFIG will
 halt when it encounters this token at the beginning of a parameter word.  This
 is particularly useful when loading the configuration header from a data file.
 .
-Parameters are not case sensitive.  The following parameters are recognized:
+All entries, both parameters and values, are forced to lower-case, so that 
+directives are case insensitive.  For the most part, that is the preferred
+behavior, but especially in labels, it is useful to use both case and white
+space to form aesthetic channel labels.  All characters within quotation 
+marks will NOT be interpreted - including whitespace.  For example,
+.   ailabel Ambient Temperature (K)
+causes an error since the "ailabel" parameter will be set to "Ambient", and
+the LOAD_CONFIG algorithm will then attempt to set the "Temperature" parameter
+to "(K)", which is, of course, nonsense.  The problem is addressed by using
+quotes.
+.   ailabel "Ambient Temperature (K)"
+.
+The following parameters are recognized:
 -CONNECTION
 .   Expects a string "eth", "usb", or "any" to specify the type of connection
 .   The connection parameter flags the creation of a new connection to 
@@ -413,6 +434,17 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   to truncate the precision of the ADC process in the name of speed.  See the
 .   T7 documentation for more information.  Unless you know what you're doing,
 .   this value should be left at 0.
+-AICALZERO, AICALSLOPE
+.   The AICALZERO and AICALSLOPE directives form a linear calibration 
+.   that can be applied to the voltage data in post-processing.  The 
+.   calibrated data should be computed in the form
+.       meas = (V - AICALZERO) * AICALSLOPE
+.   where "meas" is the calibrated measurement value, and "V" is the raw 
+.   voltage measurement.  For obvious reasons, these are floting point
+.   parameters.
+-AICALUNITS
+.   This optional string can be used to specify the units for the 
+.   calibrated measurement specified by AICALZERO and AICALSLOPE.
 -AOCHANNEL
 .   This parameter indicates the channel number to be configured for cyclic 
 .   dynamic output (function generator).  This will be used to generate a 
@@ -493,6 +525,9 @@ Parameters are not case sensitive.  The following parameters are recognized:
 .   Like the AOCHANNEL and AICHANNEL, this determines which of the FIO channels
 .   is being set.  Valid values are 0-7, but some features are not implemented
 .   on all FIO channels.  Check the T7 manual Digital IO section for details.
+-FIOLABEL
+.   This optional string can be used to label the FIO channel like AILABEL
+.   or the other labels.
 -FIOSIGNAL
 .   Sets the signal type used for this channel.  The following is a list of the
 .   supported signal types and how their settings are handled.  Measurements

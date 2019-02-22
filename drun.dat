@@ -7,21 +7,25 @@ nsample 128
 
 # Analog Inputs
 aichannel 4
+ailabel "T1"
 ainegative 5
 airange 0.100000
 airesolution 0
 
 aichannel 6
+ailabel "T2"
 ainegative 7
 airange 0.100000
 airesolution 0
 
 aichannel 8
+ailabel "T3"
 ainegative 9
 airange 0.010000
 airesolution 0
 
 aichannel 10
+ailabel "T4"
 ainegative 11
 airange 0.010000
 airesolution 0

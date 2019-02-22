@@ -111,20 +111,65 @@ void print_color(const char* head, char* value1, char* value2){
 
 
 void read_param(FILE *source, char *param){
-    int tempc;
+    int length, quote;
+    int charin;
     // clear the parameter
     // if the fscanf operation fails, this will return gracefully
     param[0] = '\0';
-    // Get the next word
-    fscanf(source, LCONF_MAX_READ, param);
-    // If the next word is the beginning of a comment
-    // read to the end of the line and try again
-    // If the next word begins with a double-hash, terminate.
-    while(param[0]=='#' && param[1]!='#'){
-        // Read the rest of the line
-        do { tempc = fgetc(source); } while(tempc!='\n' && tempc>=0);
-        fscanf(source, LCONF_MAX_READ, param);
+    length = 0;
+    quote = 0;
+    
+    while((charin=fgetc(source)) > 0 && length < LCONF_MAX_STR-1){
+        // Toggle the quote state if this is a quotation mark
+        if(charin == '"'){
+            if(quote){
+                quote = 0;
+                break;
+            }else{
+                quote = 1;
+            }
+        // If not in a quote and we found a comment character
+        }else if(!quote && charin == '#'){
+            charin = fgetc(source);
+            // If there are two ## in a row, this is the end of the 
+            // configuraiton header.  Force EOF condition and break
+            if(charin=='#'){
+                // Rewind so the read_param operation will be stuck on
+                // the ## character combination
+                fseek(source, -2, SEEK_CUR);
+                break;
+            }
+            // Read in the rest of the line
+            while(charin>0 && charin!='\n'){
+                charin = fgetc(source);
+            }
+            // If the word is empty keep reading, otherwise, get out.
+            if(length>0){
+                break;
+            }
+        // If not in quotes, force lower-case
+        }else if(!quote && charin>='A' && charin<='Z'){
+            charin += ('a' - 'A');
+            param[length++] = charin;
+        // If this is a whitespace character
+        }else if(strchr(" \n\r\t", charin)){
+            // In quotes, witespace is allowed
+            if(quote){
+                param[length++] = charin;
+            // If no text has been discovered yet, keep reading.  
+            // Otherwise that's the end of the parameter.
+            }else if(length>0){
+                break;
+            }
+        // If this is in the ascii set
+        }else if(charin >= 0x20 && charin <= 0x7F){
+            param[length++] = charin;
+        // For non-ascii or non-whitespace control characters, panic!
+        }else{
+            break;
+        }
     }
+    param[length] = '\0';
 }
 
 
@@ -158,8 +203,9 @@ void init_config(DEVCONF* dconf){
         dconf->aich[ainum].range = LCONF_DEF_AI_RANGE;
         dconf->aich[ainum].resolution = LCONF_DEF_AI_RES;
         dconf->aich[ainum].calslope = 1.;
-        dconf->aich[ainum].caloffset = 0.;
+        dconf->aich[ainum].calzero = 0.;
         dconf->aich[ainum].label[0] = '\0';
+        dconf->aich[ainum].calunits[0] = '\0';
     }
     // Analog Outputs
     dconf->naoch = 0;
@@ -371,21 +417,18 @@ int load_config(DEVCONF* dconf, const unsigned int devmax, const char* filename)
     while(!feof(ff)){
         // Read in the parameter name
         read_param(ff,param);
-        strlower(param);
-        // if the "##" termination sequence is discovered
-        if(param[0]=='#' && param[1]=='#'){
-            fclose(ff);
-            return LCONF_NOERR;
-        }
+        // If the read is finished, then dump out
+        if(param[0] == '\0')
+            break;
+        
         // Read in the parameter's value
         read_param(ff,value);
-        strlower(value);
-        // if the "##" termination sequence is discovered
-        if(param[0]=='#' && param[1]=='#'){
-            fprintf(stderr,"LOAD: Unexpected termination \"##\" while parsing parameter \"%s\".\n",param);
-            fclose(ff);
-            return LCONF_ERROR;
+        // If we find EOF while looking for a value, raise an error
+        if(value[0] == '\0'){
+            fprintf(stderr,"LOAD: Unexpected end of file while reading parameter: %s\n", param);
+            goto lconf_loadfail;
         }
+        
 
         // Case out the parameters
         //
@@ -577,9 +620,9 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
             }
             dconf[devnum].aich[ainum].calslope = ftemp;
         //
-        // The AICALOFFSET parameter
+        // The AICALZERO parameter
         //
-        }else if(streq(param,"aicaloffset")){
+        }else if(streq(param,"aicalzero")){
             ainum = dconf[devnum].naich-1;
             if(ainum<0){
                 fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
@@ -589,7 +632,17 @@ even channels they serve.  (e.g. AI0/AI1)\n", itemp, dconf[devnum].aich[ainum].c
                 fprintf(stderr,"LOAD: Illegal AIcaloffset number \"%s\". Expected float.\n",value);
                 goto lconf_loadfail;
             }
-            dconf[devnum].aich[ainum].caloffset = ftemp;
+            dconf[devnum].aich[ainum].calzero = ftemp;
+        //
+        // The AICALUNITS parameter
+        //
+        }else if(streq(param,"aicalunits")){
+            ainum = dconf[devnum].naich-1;
+            if(ainum<0){
+                fprintf(stderr,"LOAD: Cannot set analog input parameters before the first AIchannel parameter.\n");
+                goto lconf_loadfail;
+            }
+            strncpy(dconf[devnum].aich[ainum].calunits, value, LCONF_MAX_STR);
         //
         // The AILABEL parameter
         //
@@ -1829,8 +1882,6 @@ int upload_config(DEVCONF* dconf, const unsigned int devnum){
         }
     }
 
-
-
     return LCONF_NOERR;
 
     lconf_uploadfail:
@@ -2177,7 +2228,7 @@ void show_config(DEVCONF* dconf, const unsigned int devnum){
     sprintf(value2, "%d", live.naich);
     print_color("\nAnalog Input Channels", value1, value2);
     for(ainum=0;ainum<dconf[devnum].naich;ainum++){
-        printf("Analog Input [%d]:\n",ainum);
+        printf("Analog Input [%d] %s:\n",ainum, dconf[devnum].aich[ainum].label);
         sprintf(value1, "%d", dconf[devnum].aich[ainum].channel);
         sprintf(value2, "%d", live.aich[ainum].channel);
         print_color("Positive Channel",value1,value2);
@@ -2195,7 +2246,7 @@ void show_config(DEVCONF* dconf, const unsigned int devnum){
     sprintf(value2, "%d", live.naoch);
     print_color("\nAnalog Output Channels", value1, value2);
     for(aonum=0;aonum<dconf[devnum].naoch;aonum++){
-        printf("Analog Output [%d]:\n",aonum);
+        printf("Analog Output [%d] %s:\n",aonum, dconf[devnum].aoch[aonum].label);
         if(dconf[devnum].aoch[aonum].signal==AO_CONSTANT)  print_color("Signal", "constant", "?");
         else if(dconf[devnum].aoch[aonum].signal==AO_SINE)  print_color("Signal", "sine", "?");
         else if(dconf[devnum].aoch[aonum].signal==AO_SQUARE)  print_color("Signal", "square", "?");
@@ -2225,7 +2276,7 @@ void show_config(DEVCONF* dconf, const unsigned int devnum){
         print_color("FIO Frequency (Hz)", value1, value2);
     }
     for(fionum=0; fionum<dconf[devnum].nfioch; fionum++){
-        printf("Flexible Input/Output [%d]:\n", fionum);
+        printf("Flexible Input/Output [%d] %s:\n", fionum, dconf[devnum].fioch[fionum].label);
         sprintf(value1, "%d", dconf[devnum].fioch[fionum].channel);
         sprintf(value2, "%d", live.fioch[fionum].channel);
         print_color("Channel",value1,value2);

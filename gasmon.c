@@ -44,8 +44,8 @@ int main(void){
         clear_terminal();
 
         printf("%14s: %14s %14s\n", "Gas", "Vol. (scfh)", "Mass (gps)");
-        printf("%14s: %14f %14f\n", "Oxygen", o2_scfh, fg_gps);
-        printf("%14s: %14f %14f\n", "Fuel Gas", o2_scfh, fg_gps);
+        printf("%14s: %14f %14f\n", "Oxygen", o2_scfh, o2_gps);
+        printf("%14s: %14f %14f\n", "Fuel Gas", fg_scfh, fg_gps);
         printf("%14s: %14f %14f\n", "Total", total_scfh, total_gps);
         printf("%14s: %14f %14f\n", "Ratio", ratio_scfh, ratio_gps);
     }

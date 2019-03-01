@@ -1067,6 +1067,9 @@ void write_config(DEVCONF* dconf, const unsigned int devnum, FILE* ff){
         write_aiint(ainegative,nchannel);
         write_aiflt(airange,range);
         write_aiint(airesolution,resolution);
+        write_aiflt(aicalslope,calslope);
+        write_aiflt(aicalzero,calzero);
+        write_aistr(aicalunits,calunits);
         fprintf(ff,"\n");
     }
 

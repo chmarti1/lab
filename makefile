@@ -4,19 +4,19 @@ MOVEXY=$(BIN)/movexy
 MOVEX=$(BIN)/movex
 MOVEY=$(BIN)/movey
 
-movex: movex.c lconfig.h lconfig.o
+movex: smiface.h movex.c lconfig.h lconfig.o
 	gcc lconfig.o -lLabJackM -lm movex.c -o movex
 	chmod +x movex
 
-movey: movey.c lconfig.h lconfig.o
+movey: smiface.h movey.c lconfig.h lconfig.o
 	gcc lconfig.o -lLabJackM -lm movey.c -o movey
 	chmod +x movey
 
-movexy: movexy.c lconfig.h lconfig.o
+movexy: smiface.h movexy.c lconfig.h lconfig.o
 	gcc lconfig.o -lLabJackM -lm movexy.c -o movexy
 	chmod +x movexy
 
-initxy: initxy.c lconfig.h lconfig.o
+initxy: smiface.h initxy.c lconfig.h lconfig.o
 	gcc lconfig.o -lLabJackM -lm initxy.c -o initxy
 	chmod +x initxy
 

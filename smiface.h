@@ -14,8 +14,8 @@
 #define SMI_YCOM        1
 #define SMI_TIMEOUT     4000
 #define SMI_CPR         4000
-#define SMI_XTPI        16.
-#define SMI_YTPI        16.
+#define SMI_XTPMM       16./25.4
+#define SMI_YTPMM       .25
 
 // Global device configuration
 lc_devconf_t dconf;
@@ -98,22 +98,22 @@ int smi_init(){
 */
 int smi_move_x(double x_mm){
     static char tx[MAXBUFFER];
-    sprintf(tx, "P=%d\nG\n", (int) (x_mm * SMI_XTPI * SMI_CPR / 25.4));
+    sprintf(tx, "P=%d\nG\n", (int) (x_mm * SMI_XTPMM * SMI_CPR));
     return smi_com(SMI_XCOM, tx, rx, 0);
 }
 
 int smi_move_y(double y_mm){
     static char tx[MAXBUFFER];
-    sprintf(tx, "P=%d\nG\n", (int) (y_mm * SMI_XTPI * SMI_CPR / 25.4));
+    sprintf(tx, "P=%d\nG\n", (int) (y_mm * SMI_YTPMM * SMI_CPR));
     return smi_com(SMI_YCOM, tx, rx, 0);
 }
 
 int smi_move_xy(double x_mm, double y_mm){
     int err;
     static char tx[MAXBUFFER];
-    sprintf(tx, "P=%d\nG\n", (int) (x_mm * SMI_XTPI * SMI_CPR / 25.4));
+    sprintf(tx, "P=%d\nG\n", (int) (x_mm * SMI_XTPMM * SMI_CPR));
     err = smi_com(SMI_XCOM, tx, rx, 0);
-    sprintf(tx, "P=%d\nG\n", (int) (y_mm * SMI_XTPI * SMI_CPR / 25.4));
+    sprintf(tx, "P=%d\nG\n", (int) (y_mm * SMI_YTPMM * SMI_CPR));
     if(smi_com(SMI_YCOM, tx, rx, 0) || err)
         return -1;
     return 0;

@@ -6,7 +6,7 @@ import numpy as np
 import json
 import matplotlib.pyplot as plt
 
-__version__ = '3.04'
+__version__ = '4.00'
 
 
 
@@ -226,7 +226,7 @@ DEF_DEV = {
     'triglevel':0.,
     'trigpre':0,
     'trigedge':LEnum(['rising', 'falling', 'all'], state=0),
-    'fiofrequency':0,
+    'effrequency':0,
 }
 
 DEF_AICH = {
@@ -248,20 +248,31 @@ DEF_AOCH = {
     'aofrequency':-1.,
     'aoamplitude':1.,
     'aooffset':2.5,
-    'aoduty':0.5
+    'aoduty':0.5,
+    'aolabel':''
 }
 
-DEF_FIOCH = {
-    'fiochannel':-1,
-    'fiosignal':LEnum(['pwm', 'count', 'frequency', 'phase', 'quadrature']),
-    'fioedge':LEnum(['rising', 'falling', 'all']),
-    'fiodebounce':LEnum(['none', 'fixed', 'reset', 'minimum']),
-    'fiodirection':LEnum(['input', 'output']),
-    'fiousec':0.,
-    'fiodegrees':0.,
-    'fioduty':0.5,
-    'fiocount':0,
-    'fiolabel':''
+DEF_EFCH = {
+    'efchannel':-1,
+    'efsignal':LEnum(['pwm', 'count', 'frequency', 'phase', 'quadrature']),
+    'efedge':LEnum(['rising', 'falling', 'all']),
+    'efdebounce':LEnum(['none', 'fixed', 'reset', 'minimum']),
+    'efdirection':LEnum(['input', 'output']),
+    'efusec':0.,
+    'efdegrees':0.,
+    'efduty':0.5,
+    'efcount':0,
+    'eflabel':''
+}
+
+DEF_COMCH = {
+    'comchannel':LEnum(['uart', 'spi', 'i2c', '1wire', 'sbus']),
+    'comrate':-1,
+    'comin':-1,
+    'comout':-1,
+    'comclock':-1,
+    'comoptions':'',
+    'comlabel':''
 }
 
 
@@ -297,7 +308,7 @@ There are methods to determine some information on what was configured
     LC.ndata()          Number of data points loaded
     LC.naich(devnum)    Number of analog inputs on device devnum
     LC.naoch(devnum)    Number of analog outputs on device devnum
-    LC.nfioch(devnum)   Number of flexible IO channels on device devnum
+    LC.nefch(devnum)   Number of flexible IO channels on device devnum
     
 The labels of all configured channels can also be retrieved
     LC.get_labels(devnum, source='aich')
@@ -344,7 +355,7 @@ is not intended for direct access.  Instead, use the get() function.
                     # parameters are defined by their defaults in 
                     # DEF_DEV
                     self._devconf.append({
-                            'aich':[], 'aoch':[], 'fioch':[], 'meta':{}})
+                            'aich':[], 'aoch':[], 'efch':[], 'meta':{}})
                 # Detect a new analog input channel        
                 elif param == 'aichannel':
                     # Append a minimal dictionary
@@ -354,9 +365,9 @@ is not intended for direct access.  Instead, use the get() function.
                     # Append a minimal dictionary
                     self._devconf[-1]['aoch'].append({})
                 # Detect a new analog output channel
-                elif param == 'fiochannel':
+                elif param == 'efchannel':
                     # Append a minimal dictionary
-                    self._devconf[-1]['fioch'].append({})
+                    self._devconf[-1]['efch'].append({})
                     
                 #####
                 # Deal with the parameter
@@ -371,9 +382,9 @@ is not intended for direct access.  Instead, use the get() function.
                 elif param in DEF_AOCH:
                     self._devconf[-1]['aoch'][-1][param] = \
                             _filter_value(value, DEF_AOCH[param])
-                elif param in DEF_FIOCH:
-                    self._devconf[-1]['fioch'][-1][param] = \
-                            _filter_value(value, DEF_FIOCH[param])
+                elif param in DEF_EFCH:
+                    self._devconf[-1]['efch'][-1][param] = \
+                            _filter_value(value, DEF_EFCH[param])
                 # Check for meta parameters
                 elif param == 'meta':
                     if value == 'str' or value == 'string':
@@ -459,19 +470,19 @@ is not intended for direct access.  Instead, use the get() function.
                 for this in DEF_AOCH:
                     out += '    %14s : %-14s\n'%(this, repr(self.get(devnum, this, aoch=aoch)))
             out += '  * Flexible Digital IO\n'
-            for fioch in range(len(self._devconf[devnum]['fioch'])):
-                out += '    * FIOCH %d *'%fioch
-                for this in DEF_FIOCH:
-                    out += '    %14s : %-14s\n'%(this, repr(self.get(devnum, this, fioch=fioch)))
+            for efch in range(len(self._devconf[devnum]['efch'])):
+                out += '    * EFCH %d *'%efch
+                for this in DEF_EFCH:
+                    out += '    %14s : %-14s\n'%(this, repr(self.get(devnum, this, efch=efch)))
             out += '  * Meta Parameters\n'
             for param,value in self._devconf[devnum]['meta'].items():
                 out += '    %14s : %-14s\n'%(param, value)
         return out
 
     def _get_label(self, devnum, source, label):
-        """Return the index of the aich, aoch, or fioch member with the label matching label.
+        """Return the index of the aich, aoch, or efch member with the label matching label.
     """
-        lkey = {'aich':'ailabel', 'aoch':'aolabel', 'fioch':'fiolabel'}[source]
+        lkey = {'aich':'ailabel', 'aoch':'aolabel', 'efch':'eflabel'}[source]
         for index in range(len(self._devconf[devnum][source])):
             this = self._devconf[devnum][source][index]
             if lkey in this and this[lkey] == label:
@@ -496,9 +507,9 @@ is not intended for direct access.  Instead, use the get() function.
         """Return the number of analog output channels in device devnum"""
         return len(self._devconf[devnum]['aoch'])
         
-    def nfioch(self, devnum):
+    def nefch(self, devnum):
         """Return the number of flexible IO channels in device devnum"""
-        return len(self._devconf[devnum]['fioch'])
+        return len(self._devconf[devnum]['efch'])
         
     def ndata(self):
         """Return the number of data samples in the data set.  If no 
@@ -511,10 +522,10 @@ data are available, ndata() raises an exception"""
         """Return an ordered list of channel labels
     [...] = get_labels(devnum, source='aich')
 
-The default source is 'aich', but the labels for 'aoch' and 'fioch' can
+The default source is 'aich', but the labels for 'aoch' and 'efch' can
 also be retrieved.
 """
-        lkey = {'aich':'ailabel', 'aoch':'aolabel', 'fioch':'fiolabel'}[source]
+        lkey = {'aich':'ailabel', 'aoch':'aolabel', 'efch':'eflabel'}[source]
         out = []
         for this in self._devconf[devnum][source]:
             if lkey in this:
@@ -524,9 +535,9 @@ also be retrieved.
         return out
         
 
-    def get(self, devnum, param, aich=None, fioch=None, aoch=None):
+    def get(self, devnum, param, aich=None, efch=None, aoch=None):
         """Retrieve a parameter value
-    get(devnum, param, aich=None, fioch=None, aoch=None)
+    get(devnum, param, aich=None, efch=None, aoch=None)
 
 ** Global Parameters **
 To return a global parameter from device number devnum.  For example,
@@ -538,7 +549,7 @@ the parameter as an iterable like a tuple or a list.
     D.get(0, ('samplehz', 'ip'))
 
 To return a parameter belonging to one of the nested configuration 
-systems (analog inputs, analog outputs, or fio channels) use the 
+systems (analog inputs, analog outputs, or ef channels) use the 
 optional keywords to identify the channel index.
 
 ** Analog Inputs **
@@ -552,8 +563,8 @@ The aich can also be used to call out a channel by its label.  Channels
 without a label can never be matched, even if the string is empty.
     D.get(0, 'airange', aich='Ambient Temperature')
     
-** FIO and AO configuration **
-The same rules apply for the analog output and fio channels.
+** EF and AO configuration **
+The same rules apply for the analog output and ef channels.
     D.get(0, 'aosignal', aoch=0)
     
 """
@@ -561,7 +572,7 @@ The same rules apply for the analog output and fio channels.
         source = self._devconf[devnum]
         default = DEF_DEV
         
-        # Override the source and default if aich, aoch, or fioch are 
+        # Override the source and default if aich, aoch, or efch are 
         # specified.
         if aich is not None:
             # If the reference is by label, search for the correct label
@@ -577,13 +588,13 @@ The same rules apply for the analog output and fio channels.
                 aoch = self._get_label(devnum, 'aoch', aoch)
             source = source['aoch'][aoch]
             default = DEF_AOCH
-        elif fioch is not None:
+        elif efch is not None:
             # If the reference is by label, search for the correct label
             flag = False
-            if isinstance(fioch,str):
-                fioch = self._get_label(devnum, 'fioch', fioch)
-            source = source['fioch'][fioch]
-            default = DEF_FIOCH
+            if isinstance(efch,str):
+                efch = self._get_label(devnum, 'efch', efch)
+            source = source['efch'][efch]
+            default = DEF_EFCH
             
         # If the recall is multiple    
         if hasattr(param, '__iter__'):

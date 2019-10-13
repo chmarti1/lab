@@ -5,7 +5,7 @@
 #ifndef __SMIFACE_H__
 #define __SMIFACE_H__
 
-#include "lconfig.h"
+#include "lconfig/lconfig.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -22,9 +22,10 @@ lc_devconf_t dconf;
 char rx[MAXBUFFER];
 
 // Translate between raw strings and the LJ com interface
-int smi_com(int axis, char * tx, char * rx, int rxlength){
+int smi_com(int axis, char * tx, char * rx, int rxlength, int timeout){
     static unsigned char txbuffer[MAXBUFFER<<1], rxbuffer[MAXBUFFER<<1];
     int ii, jj, txlength;
+    
     txlength = strlen(tx);
     for(ii = 0; ii<txlength; ii++){
         jj = ii<<1;
@@ -32,7 +33,7 @@ int smi_com(int axis, char * tx, char * rx, int rxlength){
         txbuffer[jj+1] = tx[ii];
         //printf("%c", tx[ii]);
     }
-    if(lc_communicate(&dconf, axis, txbuffer, txlength<<1, rxbuffer, rxlength<<1, SMI_TIMEOUT))
+    if(lc_communicate(&dconf, axis, txbuffer, txlength<<1, rxbuffer, rxlength<<1, timeout))
         return -1;
     for(ii = 0; ii<rxlength; ii++){
         rx[ii] = rxbuffer[(ii<<1)+1];
@@ -54,6 +55,12 @@ int smi_conf(char config_file[]){
     return 0;
 }
 
+
+int smi_done(){
+	lc_close(&dconf);
+	return 0;
+}
+
 /* Loads a LConfig LabJack configuration file which should contain two COM
  * channels for communicating with the smart motors.  Then, initializes each
  * motor.
@@ -72,7 +79,7 @@ int smi_init(){
         
     // Init X
     memset(rx,0,sizeof(2));
-    if(smi_com(SMI_XCOM, initcmd, rx, 2)){
+    if(smi_com(SMI_XCOM, initcmd, rx, 2, SMI_TIMEOUT)){
         fprintf(stderr, "SMI_INIT: X initialization failed\n");
         return -1;
     }
@@ -82,7 +89,7 @@ int smi_init(){
     }
     // Init Y
     memset(rx,0,sizeof(2));
-    if(smi_com(SMI_YCOM, initcmd, rx, 2)){
+    if(smi_com(SMI_YCOM, initcmd, rx, 2, SMI_TIMEOUT)){
         fprintf(stderr, "SMI_INIT: X initialization failed\n");
         return -1;
     }
@@ -99,24 +106,25 @@ int smi_init(){
 int smi_move_x(double x_mm){
     static char tx[MAXBUFFER];
     sprintf(tx, "P=%d\nG\n", (int) (x_mm * SMI_XTPMM * SMI_CPR));
-    return smi_com(SMI_XCOM, tx, rx, 0);
+    return smi_com(SMI_XCOM, tx, rx, 0, SMI_TIMEOUT);
 }
 
 int smi_move_y(double y_mm){
     static char tx[MAXBUFFER];
     sprintf(tx, "P=%d\nG\n", (int) (y_mm * SMI_YTPMM * SMI_CPR));
-    return smi_com(SMI_YCOM, tx, rx, 0);
+    return smi_com(SMI_YCOM, tx, rx, 0, SMI_TIMEOUT);
 }
 
 int smi_move_xy(double x_mm, double y_mm){
     int err;
     static char tx[MAXBUFFER];
     sprintf(tx, "P=%d\nG\n", (int) (x_mm * SMI_XTPMM * SMI_CPR));
-    err = smi_com(SMI_XCOM, tx, rx, 0);
+    err = smi_com(SMI_XCOM, tx, rx, 0, SMI_TIMEOUT);
     sprintf(tx, "P=%d\nG\n", (int) (y_mm * SMI_YTPMM * SMI_CPR));
-    if(smi_com(SMI_YCOM, tx, rx, 0) || err)
+    if(smi_com(SMI_YCOM, tx, rx, 0, SMI_TIMEOUT) || err)
         return -1;
     return 0;
 }
+
 
 #endif

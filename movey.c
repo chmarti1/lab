@@ -5,7 +5,7 @@
  */
 
 
-#include "lconfig.h"
+#include "lconfig/lconfig.h"
 #include "smiface.h"
 #include <stdio.h>
 #include <getopt.h>
@@ -52,7 +52,7 @@ int main(int argc, char *argv[]){
     double y;
     
     // Initialize the configuraiton file name
-    strcpy(config_file, "move.conf");
+    strcpy(config_file, "/etc/lconfig/move.conf");
     // Initialize the unit system
     units = UNIT_MM;
 

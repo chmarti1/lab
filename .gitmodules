@@ -1,0 +1,3 @@
+[submodule "lconfig"]
+	path = lconfig
+	url = https://github.com/chmarti1/lconfig

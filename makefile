@@ -1,38 +1,39 @@
-BIN=/usr/bin
+ETC=/etc/lconfig
+INSTALL=/usr/local/bin
+BIN=bin
 INITXY=$(BIN)/initxy
 MOVEXY=$(BIN)/movexy
 MOVEX=$(BIN)/movex
 MOVEY=$(BIN)/movey
+LCONFIG=lconfig/lconfig.o
 
-movex: smiface.h movex.c lconfig.h lconfig.o
-	gcc lconfig.o -lLabJackM -lm movex.c -o movex
-	chmod +x movex
+$(MOVEX): smiface.h movex.c $(LCONFIG)
+	gcc $(LCONFIG) -lLabJackM -lm movex.c -o $(MOVEX)
 
-movey: smiface.h movey.c lconfig.h lconfig.o
-	gcc lconfig.o -lLabJackM -lm movey.c -o movey
-	chmod +x movey
+$(MOVEY): smiface.h movey.c $(LCONFIG)
+	gcc $(LCONFIG) -lLabJackM -lm movey.c -o $(MOVEY)
 
-movexy: smiface.h movexy.c lconfig.h lconfig.o
-	gcc lconfig.o -lLabJackM -lm movexy.c -o movexy
-	chmod +x movexy
+$(MOVEXY): smiface.h movexy.c $(LCONFIG)
+	gcc $(LCONFIG) -lLabJackM -lm movexy.c -o $(MOVEXY)
 
-initxy: smiface.h initxy.c lconfig.h lconfig.o
-	gcc lconfig.o -lLabJackM -lm initxy.c -o initxy
-	chmod +x initxy
+$(INITXY): smiface.h initxy.c $(LCONFIG)
+	gcc $(LCONFIG) -lLabJackM -lm initxy.c -o $(INITXY)
 
-install: initxy movexy movex movey
-	cp initxy $(INITXY)
-	chmod 755 $(INITXY)
-	cp movexy $(MOVEXY)
-	chmod 755 $(MOVEXY)
-	cp movex $(MOVEX)
-	chmod 755 $(MOVEX)
-	cp movey $(MOVEY)
-	chmod 755 $(MOVEY)
+install: $(INITXY) $(MOVEXY) $(MOVEX) $(MOVEY) move.conf
+	chown root:root $(BIN)/*
+	chmod 755 $(BIN)/*
+	cp $(BIN)/* $(INSTALL)/
+	mkdir -p $(ETC)
+	cp move.conf $(ETC)/move.conf
+	chown root:root $(ETC)/move.conf
+	chmod 644 $(ETC)/move.conf
 
 uninstall:
-	rm -f $(INITXY)
-	rm -f $(MOVEXY)
-	rm -f $(MOVEX)
-	rm -f $(MOVEY)
+	rm -f $(INSTALL)/initxy
+	rm -f $(INSTALL)/movexy
+	rm -f $(INSTALL)/movex
+	rm -f $(INSTALL)/movey
+	rm -f $(ETC)/move.conf
 
+clean:
+	rm -fv $(BIN)/*

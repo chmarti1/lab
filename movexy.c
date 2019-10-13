@@ -5,7 +5,7 @@
  */
 
 
-#include "lconfig.h"
+#include "lconfig/lconfig.h"
 #include "smiface.h"
 #include <stdio.h>
 #include <getopt.h>
@@ -13,9 +13,9 @@
 #define CONFIG_FILE "move.conf"
 
 const char help_text[] = \
-"movex  [-hi] [-c CONFIGFILE] X\n"\
-"movey  [-hi] [-c CONFIGFILE] Y\n"\
-"movexy [-hi] [-c CONFIGFILE] X Y\n"\
+"movex  [-hiw] [-c CONFIGFILE] X\n"\
+"movey  [-hiw] [-c CONFIGFILE] Y\n"\
+"movexy [-hiw] [-c CONFIGFILE] X Y\n"\
 "\n"\
 "  Communicates over a LabJack's UART with two Animatics Smart Motors to command\n"\
 "  x and y\n motion.  Motion is NOT coordinated; only the final position is\n"\
@@ -41,7 +41,10 @@ const char help_text[] = \
 "GPLv3\n"\
 "(c)2019 C.Martin\n";
 
-
+#define halt(){\
+	smi_done();\
+	return -1;\
+}
 
 /*....................
 . Main
@@ -53,13 +56,13 @@ int main(int argc, char *argv[]){
     double x, y;
     
     // Initialize the configuraiton file name
-    strcpy(config_file, "move.conf");
+    strcpy(config_file, "/etc/lconfig/move.conf");
     // Initialize the unit system
     units = UNIT_MM;
 
     // Parse the command-line options
     // use an outer foor loop as a catch-all safety
-    while(-1 != (this=getopt(argc, argv, "hic:"))){
+    while(-1 != (this=getopt(argc, argv, "whic:"))){
         switch(this){
         // Help text
         case 'h':
@@ -84,7 +87,7 @@ int main(int argc, char *argv[]){
     }
     if(argc - optind != 2){
         fprintf(stderr, "MOVEXY expects two mandatory arguments - X and Y locations\n");
-        return -1;
+        halt();
     }
     // Check for negative numbers
     if(argv[optind][0] == '_') argv[optind][0] = '-';
@@ -93,15 +96,17 @@ int main(int argc, char *argv[]){
     if(     sscanf(argv[optind], "%lf", &x)!=1 ||
             sscanf(argv[optind+1], "%lf", &y)!=1){
         fprintf(stderr, "MOVEXY expected numerical X and Y locations, but received %s, %s\n", argv[optind], argv[optind+1]);
-        return -1;
+        halt();
     }else if(units == UNIT_IN){
         x *= 25.4;
         y *= 25.4;
     }
     
     if(smi_conf(config_file))
-        return -1;
+        halt();
     if(smi_move_xy(x,y))
-        return -1;
-    return 0;;
+        halt();
+    
+    smi_done();
+    return 0;
 }

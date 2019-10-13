@@ -5,7 +5,7 @@
  */
 
 
-#include "lconfig.h"
+#include "lconfig/lconfig.h"
 #include "smiface.h"
 #include <stdio.h>
 #include <getopt.h>
@@ -37,7 +37,7 @@ int main(int argc, char *argv[]){
     char this;
     
     // Initialize the configuraiton file name
-    strcpy(config_file, "move.conf");
+    strcpy(config_file, "/etc/lconfig/move.conf");
 
     // Parse the command-line options
     // use an outer foor loop as a catch-all safety
